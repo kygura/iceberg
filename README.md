@@ -18,11 +18,13 @@ cp .env.example .env   # then add ANTHROPIC_API_KEY and EXA_API_KEY
 npm start              # http://localhost:3000
 ```
 
-The page opens on a pre-built example (the Voynich manuscript), so you can look around before adding keys.
+The page opens on a blank note. Write the topic as the title and, if you like, notes underneath to steer the research (an angle, a period, sources to favor or skip). Press Ctrl+Enter (⌘+Enter on a Mac) or **Research** to start. Type `/` in the notes for commands: research now, set the effort, open the example, start a new search.
+
+Past searches and a pre-built example (the Voynich manuscript) are in the **Saved searches** menu, so you can look around before adding keys.
 
 ## How a dive works
 
-1. Claude (`claude-opus-5-5`) plans three search queries for each level, plus searches for videos, image-rich pages, papers and Commons images.
+1. Claude (`claude-opus-5-5`) reads the topic and your notes and plans three search queries for each level, plus searches for videos, image-rich pages, papers and Commons images.
 2. The server runs them through Exa and streams results to the browser as they arrive.
 3. Claude charts each level from that level's results only, using structured output. Entries that cite nothing are dropped.
 4. **Dig deeper** on an entry fetches the cited pages in full and streams a longer write-up with citations and follow-up topics.
