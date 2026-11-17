@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { runDive, runDeep, findEntryMedia, isVideoUrl } from "../lib/pipeline.mjs";
 import { AppError } from "../lib/errors.mjs";
 import { fakeDeps } from "./fakes.mjs";
+import { LEVELS } from "../public/zones.js";
 
 async function collect(fn) {
   const events = [];
@@ -10,7 +11,7 @@ async function collect(fn) {
   return events;
 }
 
-test("a dive charts six layers and every cited id points at an emitted source", async () => {
+test("a dive charts every layer and every cited id points at an emitted source", async () => {
   const { deps } = fakeDeps();
   const events = await collect((emit) => runDive({ topic: "test", depth: "quick", emit, signal: new AbortController().signal, deps }));
   const plan = events.find((e) => e.type === "plan");
@@ -19,7 +20,7 @@ test("a dive charts six layers and every cited id points at an emitted source", 
   const lastDone = new Map();
   for (const e of events) if (e.type === "layer" && e.status === "done") lastDone.set(e.index, e);
   const done = [...lastDone.values()];
-  assert.equal(done.length, 6);
+  assert.equal(done.length, LEVELS);
   for (const l of done) {
     assert.equal(l.entries.length, 2, "entries citing unknown tags are dropped");
     for (const en of l.entries) for (const id of en.sources) assert.ok(sources.has(id), `source ${id} was emitted`);
@@ -29,7 +30,7 @@ test("a dive charts six layers and every cited id points at an emitted source", 
   assert.ok([...sources.values()].some((s) => s.image), "og images pass through");
   const fin = events.at(-1);
   assert.equal(fin.type, "done");
-  assert.equal(fin.charted, 6);
+  assert.equal(fin.charted, LEVELS);
 });
 
 test("sources are de-duplicated by URL", async () => {
@@ -46,7 +47,7 @@ test("one layer failing does not stop the others", async () => {
   const failed = events.find((e) => e.type === "layer" && e.status === "error");
   assert.equal(failed.index, 2);
   assert.equal(events.at(-1).type, "done");
-  assert.equal(events.at(-1).charted, 5);
+  assert.equal(events.at(-1).charted, LEVELS - 1);
 });
 
 test("a fatal Exa error ends the dive with that message", async () => {
@@ -82,7 +83,7 @@ test("entries carry media that Claude attached plus per-entry Commons pictures",
   const events = await collect((emit) => runDive({ topic: "t", depth: "quick", emit, signal: new AbortController().signal, deps }));
   const sources = new Map(events.filter((e) => e.type === "source").map((e) => [e.source.id, e.source]));
   const chartPrompts = calls.prompts.filter((p) => p.includes("MEDIA (videos"));
-  assert.equal(chartPrompts.length, 6);
+  assert.equal(chartPrompts.length, LEVELS);
   assert.match(chartPrompts[0], /\[M1\] (video|image)/, "the media pool is offered to Claude");
   // last layer event per index carries the enriched entries
   const last = new Map();
@@ -124,7 +125,7 @@ test("the researcher's notes reach the planning and charting prompts", async () 
   const { deps, calls } = fakeDeps();
   await collect((emit) => runDive({ topic: "t", notes: "Focus on 1970s carbon dating", depth: "quick", emit, signal: new AbortController().signal, deps }));
   const withNotes = calls.prompts.filter((p) => p.includes("<notes>\nFocus on 1970s carbon dating\n</notes>"));
-  assert.equal(withNotes.length, 7, "plan plus six charting prompts");
+  assert.equal(withNotes.length, 1 + LEVELS, "plan plus one charting prompt per level");
 });
 
 test("official records are searched for, offered to every level and cited first", async () => {
@@ -144,4 +145,22 @@ test("official records are searched for, offered to every level and cited first"
     assert.equal(first.tier, "official", "Claude listed it third; the server puts it first");
     assert.equal(ev.entries[0].sources.length, 3);
   }
+});
+
+test("thorough dives follow each level's leads with a second round of searches", async () => {
+  const { deps, calls } = fakeDeps();
+  const events = await collect((emit) => runDive({ topic: "t", depth: "thorough", emit, signal: new AbortController().signal, deps }));
+  const leadPrompts = calls.prompts.filter((p) => p.startsWith("You are researching one layer"));
+  assert.equal(leadPrompts.length, LEVELS, "one lead list per level");
+  assert.ok(calls.search.includes("tip lead query"), "leads are searched");
+  assert.ok(events.some((e) => e.type === "layer" && e.status === "following"));
+  const chart = calls.prompts.find((p) => p.includes("MEDIA (videos") && p.includes("This layer: Above water,"));
+  assert.match(chart, /Result 1 for tip lead query/, "second-round results reach the charting prompt");
+  assert.equal(events.at(-1).charted, LEVELS);
+});
+
+test("quick dives skip the lead round", async () => {
+  const { deps, calls } = fakeDeps();
+  await collect((emit) => runDive({ topic: "t", depth: "quick", emit, signal: new AbortController().signal, deps }));
+  assert.ok(!calls.prompts.some((p) => p.startsWith("You are researching one layer")));
 });

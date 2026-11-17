@@ -1,4 +1,4 @@
-import { ZONES as ZONE_TEXT } from "./zones.js";
+import { ZONES as ZONE_TEXT, LEVELS } from "./zones.js";
 import { EXAMPLE } from "./example.js";
 import { createNotesEditor } from "./editor.js";
 import { tierOf, rankOf, labelOf } from "./provenance.js";
@@ -146,7 +146,7 @@ function renderHero() {
       h("span", {}, h("b", { text: String(entries) }), " entries"),
       h("span", {}, h("b", { text: String(ice.sources.length) }), " sources"),
       h("span", {}, h("b", { text: String(media) }), " with images or video"),
-      h("span", {}, h("b", { text: `${done}/6` }), " levels charted"))].filter(Boolean));
+      h("span", {}, h("b", { text: `${done}/${LEVELS}` }), " levels charted"))].filter(Boolean));
 }
 
 /* One image per entry, drawn from its media. Prefer an image no other
@@ -183,27 +183,28 @@ function levelEl(i) {
       "aria-label": `${e.term}. ${e.confidence || "established"}, ${e.sources.length} source${e.sources.length === 1 ? "" : "s"}`,
       onclick: () => openEntry(i, k),
     }, entryThumb(e, thumbs.get(i + ":" + k)), h("span", { class: "et" }, e.term, e.sources.length ? h("sup", { text: String(e.sources.length) }) : null)));
-  } else if (["pending", "searching", "charting"].includes(layer.status)) {
-    inner = [5, 8, 4, 7].map((w) => h("span", { class: "skel", style: `width:${w}em` }));
+  } else if (["pending", "searching", "following", "charting"].includes(layer.status)) {
+    inner = [5, 8, 4, 7, 6, 9, 5, 7].map((w) => h("span", { class: "skel", style: `width:${w}em` }));
   } else if (layer.status === "error") {
     inner = [h("span", { class: "note bad", text: layer.error || "This level couldn't be charted." })];
   } else {
-    inner = [h("span", { class: "note", text: "No results at this level." })];
+    inner = [h("span", { class: "note", text: layer.missing ? "This level was added after this search was saved. Run it again to fill it." : "No results at this level." })];
   }
-  const busy = layer.status === "searching" || layer.status === "charting";
+  const busy = ["searching", "following", "charting"].includes(layer.status);
   const cited = new Set(layer.entries.flatMap((e) => e.sources)).size;
   const count = {
-    pending: "waiting", searching: "searching the web", charting: "reading results",
+    pending: "waiting", searching: "searching the web", following: "following leads", charting: "reading results",
     done: `${layer.entries.length} entries · ${cited} sources`, error: "failed", empty: "no results",
   }[layer.status] || "";
 
   return h("section", { class: "level", id: "lv-" + z.key, "data-level": String(z.level), "aria-label": `Level ${z.level}: ${z.name}` },
     h("div", { class: "level-in" },
     h("div", { class: "rail" },
-      h("span", { class: "num", text: `${String(z.level).padStart(2, "0")} / 06` }),
+      h("span", { class: "num" }, h("span", { text: `Level ${z.level}` }), h("span", { class: "depth", text: z.depth })),
       h("span", { class: "name", text: z.name }),
+      h("span", { class: "label", text: z.label }),
       !layer.theme && layer.status === "pending" && state.busy ? h("span", { class: "theme" }, h("span", { class: "skel", style: "width:11em" }))
-        : h("span", { class: "theme", text: layer.theme || z.short }),
+        : layer.theme ? h("span", { class: "theme", text: layer.theme }) : null,
       h("span", { class: "count" + (busy ? " busy" : ""), text: count })),
     h("div", { class: "entries" }, inner),
     levelMedia(i)));
@@ -232,7 +233,7 @@ function levelMedia(i) {
 function renderBand(i) { const old = document.getElementById("lv-" + ZONES[i].key); const el = levelEl(i); if (old) old.replaceWith(el); else $("#levels").append(el); renderLvNav(); }
 function renderOcean() { $("#levels").replaceChildren(...ZONES.map((_, i) => levelEl(i))); renderLvNav(); }
 
-/* Phones: a sticky bar of the six levels, marking the one on screen. */
+/* Phones: a sticky bar of the levels, marking the one on screen. */
 function renderLvNav() {
   const ice = state.ice;
   $("#lvnav").replaceChildren(...ZONES.map((z, i) => h("button", {
@@ -351,8 +352,16 @@ function renderAll() {
   if (empty) { $("#levels").replaceChildren(); $("#lvnav").replaceChildren(); $("#sources").replaceChildren(); return; }
   renderOcean(); renderSeabed();
 }
+/* Older saves have six levels; line their layers up with the current levels by key. */
+function withAllLevels(ice) {
+  if (!ice || (ice.layers.length === LEVELS && ice.layers.every((l, i) => l.key === ZONES[i].key))) return ice;
+  const layers = ZONES.map((z) => ice.layers.find((l) => l.key === z.key)
+    || { key: z.key, status: "empty", entries: [], theme: "", missing: true });
+  return Object.assign(ice, { layers });
+}
 function show(ice) {
   if (state.busy) return;
+  withAllLevels(ice);
   state.ice = ice; state.allSources = false; closeDrawer();
   if (ice) setNote(ice.topic || ice.title, ice.notesDoc || ice.notes || ""); else { const d = loadDraft(); setNote(d.topic, d.doc); }
   renderAll(); window.scrollTo({ top: 0 });
@@ -447,7 +456,7 @@ async function build(topic, notes = "", notesDoc = null) {
   const ice = { id: "ice-" + Date.now().toString(36), topic, notes, notesDoc: notes ? notesDoc : null, title: topic, summary: "", createdAt: Date.now(), sources: [],
     layers: ZONES.map((z) => ({ key: z.key, status: "pending", entries: [], theme: "" })) };
   state.ice = ice; closeDrawer(); setBusy(true); renderAll();
-  prog.total = 1 + 6 * 2; prog.done = 0;
+  prog.total = 1 + LEVELS * 3; prog.done = 0;
   setStatus(`Planning searches for “${topic}”…`, "busy");
   let finished = false;
   try {
@@ -468,11 +477,12 @@ async function build(topic, notes = "", notesDoc = null) {
         l.status = ev.status;
         if (ev.entries) l.entries = ev.entries;
         if (ev.error) l.error = ev.error;
-        if (["done", "empty", "error"].includes(ev.status)) prog.done += 2; else if (ev.status === "charting") prog.done += 1;
+        const step = { following: 1, charting: 2, done: 3, empty: 3, error: 3 }[ev.status] || 0;
+        if (step > (l.steps || 0)) { prog.done += step - (l.steps || 0); l.steps = step; }
         setProgress(); renderBand(ev.index); renderHero();
       } else if (ev.type === "done") {
         finished = true;
-        setStatus(ev.charted ? `Charted ${ev.charted} of 6 levels from ${ev.sources} sources.` : "No level could be charted. Try a more specific topic.", ev.charted ? null : "err");
+        setStatus(ev.charted ? `Charted ${ev.charted} of ${LEVELS} levels, ${countEntries(ice)} entries, from ${ev.sources} sources.` : "No level could be charted. Try a more specific topic.", ev.charted ? null : "err");
       } else if (ev.type === "error") {
         finished = true;
         setStatus(ev.error?.message || "The dive failed.", "err");
@@ -483,7 +493,7 @@ async function build(topic, notes = "", notesDoc = null) {
     if (ctl.signal.aborted || e?.name === "AbortError") setStatus("Stopped. Finished levels are kept.");
     else setStatus(e?.message || "Couldn't reach the server. Is it still running?", "err");
   } finally {
-    ice.layers.forEach((l, i) => { if (["pending", "searching", "charting"].includes(l.status)) { l.status = "error"; l.error = "Stopped before this level was reached."; renderBand(i); } });
+    ice.layers.forEach((l, i) => { delete l.steps; if (["pending", "searching", "following", "charting"].includes(l.status)) { l.status = "error"; l.error = "Stopped before this level was reached."; renderBand(i); } });
     if (buildCtl === ctl) buildCtl = null;
     setBusy(false); renderSeabed();
     if (ice.layers.some((l) => l.entries.length)) saveHistory(ice);
@@ -582,7 +592,7 @@ function openEntry(li, ei, mediaId) {
   const ice = state.ice; const e = ice.layers[li].entries[ei]; const z = ZONES[li];
   state.open = { li, ei };
   if ($("#drawer").hidden) lastFocus = document.activeElement;
-  $("#dZone").replaceChildren(h("span", { text: `Level ${z.level} of 6` }), h("b", { text: z.name }));
+  $("#dZone").replaceChildren(h("span", { text: `Level ${z.level} of ${LEVELS} · ${z.depth}` }), h("b", { text: z.name }));
   document.querySelectorAll(".entry.open").forEach((el) => el.classList.remove("open"));
   document.querySelectorAll(`#lv-${z.key} .entry`)[ei]?.classList.add("open");
   const srcs = byCloseness(e.sources.map((id) => sourceById(ice, id)).filter(Boolean));
@@ -639,7 +649,7 @@ function splitHoles(text) {
 async function digDeeper(ice, e, ui) {
   deepCtl?.abort();
   const ctl = deepCtl = new AbortController();
-  const srcs = byCloseness(e.sources.map((id) => sourceById(ice, id)).filter(Boolean)).slice(0, 3);
+  const srcs = byCloseness(e.sources.map((id) => sourceById(ice, id)).filter(Boolean)).slice(0, 5);
   ui.digBtn.disabled = true; ui.stopBtn.hidden = false; ui.deepErr.hidden = true;
   ui.deepBox.hidden = false; ui.holesBox.replaceChildren();
   ui.deepBox.innerHTML = `<p class="think">Starting…</p>`;

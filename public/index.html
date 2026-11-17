@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Iceberg Sounder</title>
-<meta name="description" content="Search a topic and sort what's known about it into six levels, from common knowledge to contested claims, with sources for every entry.">
+<meta name="description" content="Search a topic and sort what's known about it into seven levels, from common knowledge down through the records and the forgotten material to contested claims, with sources for every entry.">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -84,7 +84,7 @@
 
 <main class="chart" aria-label="Iceberg chart">
   <div class="wrap chart-head">
-    <p>Six levels, from common knowledge to contested claims.</p>
+    <p>Seven levels, from what everyone has heard down to what nobody can settle.</p>
     <div class="legend" aria-label="How entries are marked">
       <span class="s-est">Established</span>
       <span class="s-deb">Debated</span>
@@ -103,7 +103,7 @@
     <ol class="sources" id="sources"></ol>
     <button class="btn more" id="srcMore" type="button" hidden></button>
     <div class="how">
-      <div><b>How it works.</b> Claude writes three web searches for each level, at least one aimed at an official record, plus one search for the topic's primary documents, and Exa runs them. Claude then sorts the results into levels using only what those pages say. Each entry cites the closest source first: official records, then archives, scholarship, reference works, press, other sites and video, in that order. <b>Dig deeper</b> has Claude read an entry's cited pages in full.</div>
+      <div><b>How it works.</b> Claude writes five web searches for each level, at least two aimed at official records, plus one search for the topic's primary documents, and Exa runs them. Claude reads each level's results and names the leads worth chasing (people, documents, cases they mention), and those get a second round of searches. Claude then sorts the results into levels using only what those pages say. Each entry cites the closest source first: official records, then archives, scholarship, reference works, press, other sites and video, in that order. <b>Dig deeper</b> has Claude read an entry's cited pages in full.</div>
       <div>Images and videos come from the cited pages, Wikimedia Commons (credited with author and license), YouTube and Vimeo. Icebergs you make are saved in this browser only.</div>
     </div>
   </div>

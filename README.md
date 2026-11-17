@@ -2,7 +2,7 @@
 
 Live at **https://iceberg.nca.ink**
 
-Name a research topic and get an iceberg chart: six levels from common knowledge down to contested claims, built from live web search, with every entry citing its sources. Images and video live with the entries they show:
+Name a research topic and get an iceberg chart: seven levels from common knowledge down to contested claims, with 60 to 80 entries in a full dive, built from live web search, with every entry citing its sources. Images and video live with the entries they show:
 
 - **Each level** shows a strip of its entries' pictures and videos.
 - **Each entry** opens a modal with a media stage (videos play inline through YouTube's privacy-enhanced player or Vimeo; images open full size), a filmstrip of everything attached, then the text and sources.
@@ -22,20 +22,35 @@ The page opens on a blank note. Write the topic as the title and, if you like, n
 
 Past searches and a pre-built example (the Voynich manuscript) are in the **Saved searches** menu, so you can look around before adding keys.
 
+## The levels
+
+| | Level | Depth | What goes there |
+|---|---|---|---|
+| 1 | Above water | +10 m | What everyone has heard |
+| 2 | The waterline | 0 m | The standard account |
+| 3 | The shallows | 50 m | What enthusiasts know: people, dates, terms, side stories |
+| 4 | Deep water | 200 m | What specialists argue about |
+| 5 | The archive floor | 1,000 m | What the records say: filings, patents, letters, data |
+| 6 | The abyss | 4,000 m | What got forgotten: overlooked incidents, minor figures, lost items |
+| 7 | The trench | 11,000 m | What nobody can settle: fringe theories, disputes, open questions |
+
+Entries get smaller and quieter level by level. Searches saved before level 6 existed open with that level marked as missing.
+
 ## How a dive works
 
-1. Claude (`claude-opus-5-5`) reads the topic and your notes and plans three search queries for each level (at least one aimed at an official record or primary document), one search for the topic's official records, plus searches for videos, image-rich pages, papers and Commons images.
+1. Claude (`claude-opus-5-5`) reads the topic and your notes and plans five search queries for each level, each after a different angle (at least two aimed at official records or primary documents), one search for the topic's official records, plus searches for videos, image-rich pages, papers and Commons images.
 2. The server runs them through Exa and streams results to the browser as they arrive.
-3. Claude charts each level from that level's results plus the topic's official records, using structured output. Entries that cite nothing are dropped.
+3. Claude reads each level's first-round results and lists 4 to 6 leads they point toward (a named person, a court filing, a patent, an incident) that the results don't cover yet. Those get a second round of searches. Quick dives skip this round.
+4. Claude charts each level from both rounds plus the topic's official records, using structured output: 6 to 8 entries at the top, up to 12 further down. Entries that cite nothing are dropped.
 
 Sources are ranked by how close they are to the original (`public/provenance.js`): official records (government, courts, legislation, patents), then archives, libraries and museums, scholarship, reference works, press, other sites, and video last. Claude is told to cite the closest source, and the server sorts each entry's citations by that rank. Media follows the same order: document scans and archival photos before decorative images, official or archival footage before other video.
-4. **Dig deeper** on an entry fetches the cited pages in full and streams a longer write-up with citations and follow-up topics.
+5. **Dig deeper** on an entry fetches the cited pages in full and streams a longer write-up with citations and follow-up topics.
 
 The Quick / Thorough / Deepest setting maps to Claude's `low` / `medium` / `high` effort. Requests use the API's server-side refusal fallback, so a declined request is retried on a fallback model instead of failing.
 
 ## Cost
 
-A dive makes 7 Claude calls and about 21 Exa searches; a deep dive makes 1 of each plus a page fetch. Every dive is billed to whichever keys it runs on. The server listens on 127.0.0.1 by default.
+A dive makes 15 Claude calls (1 plan, 7 lead lists at low effort, 7 charts) and up to about 80 Exa searches; a Quick dive skips the lead lists and makes 8 calls and about 40 searches. A deep dive makes 1 Claude call plus a page fetch of up to 5 sources. Every dive is billed to whichever keys it runs on. The server listens on 127.0.0.1 by default.
 
 ## Keys
 

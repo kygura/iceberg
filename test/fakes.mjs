@@ -25,7 +25,11 @@ export function fakeDeps({ exaFails = null, chartFailsAt = -1, slowMs = 0 } = {}
           commons: "test topic",
         };
       }
-      const zone = ZONES.find((z) => prompt.includes(`This layer: ${z.name} (`));
+      if (prompt.startsWith("You are researching one layer")) {
+        const z = ZONES.find((x) => prompt.includes(`This layer: ${x.name},`));
+        return { leads: [{ lead: `${z.key} lead`, query: `${z.key} lead query` }] };
+      }
+      const zone = ZONES.find((z) => prompt.includes(`This layer: ${z.name},`));
       if (ZONES.indexOf(zone) === chartFailsAt) throw new AppError("bad_output", "Claude's answer didn't match the expected format.", { source: "claude" });
       return {
         entries: [
