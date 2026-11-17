@@ -157,3 +157,26 @@ test("owner link: the secret sets a cookie that unlocks the server's keys on Ver
     assert.equal((await post(b + "/api/owner", { secret: "anything-at-all-123" })).status, 401, "no OWNER_SECRET, no owner mode");
   });
 });
+
+test("chat needs only an Anthropic key and checks the conversation's shape", async () => {
+  const { deps } = fakeDeps();
+  const half = { ...deps, exa: { ...deps.exa, configured: false } };
+  await withHandlerApp(half, { env: {} }, async (b) => {
+    const ok = await post(b + "/api/chat", { topic: "T", digest: "TOPIC: T", messages: [{ role: "user", text: "What is known?" }] });
+    assert.equal(ok.status, 200, "no Exa key needed");
+    const lines = (await ok.text()).trim().split("\n").map((l) => JSON.parse(l));
+    assert.ok(lines.some((l) => l.type === "text"));
+    assert.equal(lines.at(-1).type, "done");
+    const noDigest = await post(b + "/api/chat", { topic: "T", digest: "", messages: [{ role: "user", text: "Q" }] });
+    assert.equal(noDigest.status, 400);
+    const endsOnBot = await post(b + "/api/chat", { topic: "T", digest: "D", messages: [{ role: "user", text: "Q" }, { role: "assistant", text: "A" }] });
+    assert.equal(endsOnBot.status, 400);
+    const twoUsers = await post(b + "/api/chat", { topic: "T", digest: "D", messages: [{ role: "user", text: "Q" }, { role: "user", text: "Q2" }] });
+    assert.equal(twoUsers.status, 400);
+  });
+  await withHandlerApp(noServerKeys(), { env: {} }, async (b) => {
+    const r = await post(b + "/api/chat", { topic: "T", digest: "D", messages: [{ role: "user", text: "Q" }] });
+    assert.equal(r.status, 401);
+    assert.deepEqual((await r.json()).error.missing, ["Anthropic"]);
+  });
+});

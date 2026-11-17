@@ -2,6 +2,7 @@ import { ZONES as ZONE_TEXT, LEVELS } from "./zones.js";
 import { EXAMPLE } from "./example.js";
 import { createNotesEditor } from "./editor.js";
 import { tierOf, rankOf, labelOf } from "./provenance.js";
+import { digestOf, digestStats } from "./digest.js";
 
 const ZONES = ZONE_TEXT;
 
@@ -348,7 +349,7 @@ function renderAll() {
   const empty = !state.ice;
   document.body.classList.toggle("empty", empty);
   $("main.chart").hidden = empty; $("section.appendix").hidden = empty;
-  renderHero(); renderRecent();
+  renderHero(); renderRecent(); renderChat();
   if (empty) { $("#levels").replaceChildren(); $("#lvnav").replaceChildren(); $("#sources").replaceChildren(); return; }
   renderOcean(); renderSeabed();
 }
@@ -362,6 +363,7 @@ function withAllLevels(ice) {
 function show(ice) {
   if (state.busy) return;
   withAllLevels(ice);
+  chatCtl?.abort(); chatCtl = null;
   state.ice = ice; state.allSources = false; closeDrawer();
   if (ice) setNote(ice.topic || ice.title, ice.notesDoc || ice.notes || ""); else { const d = loadDraft(); setNote(d.topic, d.doc); }
   renderAll(); window.scrollTo({ top: 0 });
@@ -524,7 +526,7 @@ async function build(topic, notes = "", notesDoc = null) {
         if (ev.error) l.error = ev.error;
         const step = { following: 1, charting: 2, done: 3, empty: 3, error: 3 }[ev.status] || 0;
         if (step > (l.steps || 0)) { prog.done += step - (l.steps || 0); l.steps = step; }
-        setProgress(); renderBand(ev.index); renderHero();
+        setProgress(); renderBand(ev.index); renderHero(); renderChat();
       } else if (ev.type === "done") {
         finished = true;
         setStatus(ev.charted ? `Charted ${ev.charted} of ${LEVELS} levels, ${countEntries(ice)} entries, from ${ev.sources} sources.` : "No level could be charted. Try a more specific topic.", ev.charted ? null : "err");
@@ -729,6 +731,154 @@ async function digDeeper(ice, e, ui) {
   }
 }
 
+/* ===== Chat about the findings ===== */
+/* A sidebar where the reader asks Claude about this iceberg. Each request sends
+   a compact digest of the chart (see digest.js) plus the conversation so far.
+   The conversation is kept on the iceberg, so it is saved with it. */
+let chatCtl = null;
+const chatOpen = () => !$("#chat").hidden;
+const canChat = () => server.ok && (!!userKeys.anthropic || server.claude);
+const chatReady = (ice) => !!ice && ice.layers.some((l) => l.entries.length);
+const STARTERS = [
+  "Which entries are best documented, and by which kind of source?",
+  "What is contested here, and what does each side point to?",
+  "Which entries rest on a single source or a weak one?",
+  "Walk me from the top level to the bottom in a few paragraphs.",
+];
+/* Finds an entry by its printed term, for [[Term]] links in answers. */
+function findEntry(ice, term) {
+  const t = term.trim().toLowerCase();
+  for (const [li, l] of ice.layers.entries()) {
+    const ei = l.entries.findIndex((e) => e.term.trim().toLowerCase() === t);
+    if (ei >= 0) return { li, ei };
+  }
+  return null;
+}
+/* Answers: paragraphs, short lists, **bold**, [n] citations and [[Term]] entry links. */
+function chatMd(text, ice) {
+  const inline = (line) => esc(line)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\[\[([^\]\n]{1,140})\]\]/g, (m, term) => {
+      const at = findEntry(ice, term.replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"'));
+      return at ? `<a href="#lv-${ZONES[at.li].key}" class="chat-entry" role="button" data-li="${at.li}" data-ei="${at.ei}">${term}</a>` : term;
+    })
+    .replace(/\[(\d{1,4})\]/g, (m, n) => (ice.sources.some((x) => x.id === +n) ? `<a class="cite" href="#src-${n}" data-cite="${n}">[${n}]</a>` : m));
+  // Within a block, consecutive list lines become one list; other lines a paragraph.
+  const kindOf = (l) => (/^\s*[-*]\s+/.test(l) ? "ul" : /^\s*\d+[.)]\s+/.test(l) ? "ol" : "p");
+  return String(text).trim().split(/\n{2,}/).filter(Boolean).map((block) => {
+    const runs = [];
+    for (const l of block.split("\n").filter((x) => x.trim())) {
+      const k = kindOf(l);
+      if (runs.length && runs.at(-1).k === k) runs.at(-1).lines.push(l); else runs.push({ k, lines: [l] });
+    }
+    return runs.map(({ k, lines }) => k === "p" ? "<p>" + lines.map(inline).join("<br>") + "</p>"
+      : `<${k}>` + lines.map((l) => "<li>" + inline(l.replace(/^\s*(?:[-*]|\d+[.)])\s+/, "")) + "</li>").join("") + `</${k}>`).join("");
+  }).join("");
+}
+function chatMsgEl(m, ice) {
+  if (m.role === "user") return h("div", { class: "chat-msg user", text: m.text });
+  const el = h("div", { class: "chat-msg bot" });
+  el.innerHTML = chatMd(m.text, ice);
+  return el;
+}
+function renderChat() {
+  const ice = state.ice; const ready = chatReady(ice);
+  $("#chatLaunch").hidden = !ready || chatOpen();
+  $("#chatLaunch").setAttribute("aria-expanded", String(chatOpen()));
+  if (!ready) { if (chatOpen()) closeChat(); return; }
+  const st = digestStats(ice);
+  $("#chatMeta").textContent = `${st.entries} entries · ${st.levels} levels · ${st.sources} sources`;
+  const log = ice.chat || [];
+  $("#chatClear").hidden = !log.length || !!chatCtl;
+  const kids = log.map((m) => chatMsgEl(m, ice));
+  if (!log.length) {
+    kids.push(h("div", { class: "chat-empty" },
+      h("p", { text: `Ask anything about ${ice.title || ice.topic}. Answers come from the ${st.entries} entries and ${st.sources} sources in this iceberg, with citations.` }),
+      h("div", { class: "chat-starters" }, STARTERS.map((q) => h("button", { class: "chip", type: "button", text: q, onclick: () => askChat(q) })))));
+  }
+  if (!canChat()) kids.push(h("div", { class: "err" }, "Asking needs an Anthropic key. ", h("button", { class: "linkish", type: "button", text: "Add it under Keys", onclick: () => { closeChat(); openKeys(); } }), "."));
+  $("#chatLog").replaceChildren(...kids);
+  $("#chatSend").disabled = !canChat() || !!chatCtl;
+  $("#chatSend").hidden = !!chatCtl; $("#chatStop").hidden = !chatCtl;
+}
+function openChat() {
+  if (!chatReady(state.ice)) return;
+  $("#chat").hidden = false; document.body.classList.add("chat-open");
+  renderChat(); scrollChat(); $("#chatInput").focus();
+}
+function closeChat() {
+  if ($("#chat").hidden) return;
+  $("#chat").hidden = true; document.body.classList.remove("chat-open");
+  renderChat(); $("#chatLaunch").focus?.();
+}
+const scrollChat = () => { const log = $("#chatLog"); log.scrollTop = log.scrollHeight; };
+function sizeChatInput() { const t = $("#chatInput"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight + 2, 160) + "px"; }
+async function askChat(question) {
+  const ice = state.ice; question = String(question || "").trim();
+  if (!question || chatCtl || !canChat() || !chatReady(ice)) return;
+  ice.chat = ice.chat || [];
+  ice.chat.push({ role: "user", text: question });
+  $("#chatInput").value = ""; sizeChatInput();
+  const ctl = chatCtl = new AbortController();
+  renderChat();
+  const bot = h("div", { class: "chat-msg bot" }, h("p", { class: "think", text: "Reading the findings…" }));
+  $("#chatLog").append(bot); scrollChat();
+  let text = "", ok = false, failed = "";
+  try {
+    const events = await postStream("/api/chat", {
+      topic: ice.title || ice.topic, depth: $("#tier").value, digest: digestOf(ice),
+      messages: ice.chat.map((m) => ({ role: m.role, text: m.text })),
+    }, ctl.signal);
+    for await (const ev of events) {
+      if (ev.type === "reset") text = "";
+      else if (ev.type === "text") {
+        const stick = $("#chatLog").scrollHeight - $("#chatLog").scrollTop - $("#chatLog").clientHeight < 40;
+        text += ev.delta; bot.innerHTML = chatMd(text, ice);
+        if (stick) scrollChat();
+      } else if (ev.type === "done") ok = true;
+      else if (ev.type === "error") failed = ev.error?.message || "The answer failed.";
+    }
+  } catch (err) {
+    if (!(ctl.signal.aborted || err?.name === "AbortError")) failed = err?.message || "Couldn't reach the server.";
+  } finally {
+    if (chatCtl === ctl) chatCtl = null;
+  }
+  if (state.ice !== ice) return;
+  if (text.trim()) {
+    // A stopped answer is kept as far as it got, so the conversation still alternates.
+    ice.chat.push({ role: "assistant", text: text.trim() + (ok ? "" : "\n\n(Stopped before the answer finished.)") });
+    if (!ice.example) saveHistory(ice);
+  } else {
+    // Nothing came back: drop the question and put it back in the box.
+    ice.chat.pop();
+    $("#chatInput").value = question; sizeChatInput();
+  }
+  renderChat(); scrollChat();
+  if (failed) { $("#chatLog").append(h("div", { class: "chat-msg bot" }, h("p", { class: "err", text: failed }))); scrollChat(); }
+}
+$("#chatLaunch").addEventListener("click", openChat);
+$("#chatClose").addEventListener("click", closeChat);
+$("#chatStop").addEventListener("click", () => chatCtl?.abort());
+$("#chatClear").addEventListener("click", () => {
+  const ice = state.ice; if (!ice || chatCtl) return;
+  ice.chat = []; if (!ice.example) saveHistory(ice); renderChat(); $("#chatInput").focus();
+});
+$("#chatForm").addEventListener("submit", (ev) => { ev.preventDefault(); askChat($("#chatInput").value); });
+$("#chatInput").addEventListener("input", sizeChatInput);
+$("#chatInput").addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); askChat($("#chatInput").value); }
+});
+$("#chatLog").addEventListener("click", (ev) => {
+  const b = ev.target.closest(".chat-entry");
+  if (!b || !state.ice) return;
+  ev.preventDefault();
+  const li = +b.dataset.li, ei = +b.dataset.ei;
+  if (!state.ice.layers[li]?.entries[ei]) return;
+  if (window.innerWidth < 1240) closeChat();
+  document.getElementById("lv-" + ZONES[li].key)?.scrollIntoView({ block: "center" });
+  openEntry(li, ei);
+});
+
 /* ===== Lightbox ===== */
 let lbReturn = null;
 function openLightbox(s) {
@@ -752,7 +902,7 @@ $("#dClose").addEventListener("click", closeDrawer);
 $("#scrim").addEventListener("click", closeDrawer);
 $("#lbClose").addEventListener("click", closeLightbox);
 $("#lightbox").addEventListener("click", (ev) => { if (ev.target.id === "lightbox") closeLightbox(); });
-document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { if (!$("#slash").hidden) return; if (effortOpen()) { closeEffort(true); return; } if ($("#keys").open) $("#keys").open = false; else if ($("#saved")?.open) closeSaved(); else if (!$("#lightbox").hidden) closeLightbox(); else closeDrawer(); } });
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { if (!$("#slash").hidden) return; if (effortOpen()) { closeEffort(true); return; } if ($("#keys").open) $("#keys").open = false; else if ($("#saved")?.open) closeSaved(); else if (!$("#lightbox").hidden) closeLightbox(); else if (!$("#drawer").hidden) closeDrawer(); else if (chatOpen() && !chatCtl) closeChat(); } });
 document.addEventListener("click", (ev) => {
   const a = ev.target.closest("a.cite");
   if (!a) return;
@@ -761,6 +911,7 @@ document.addEventListener("click", (ev) => {
   if (el?.hidden) { state.allSources = true; renderSources(); el = document.getElementById("src-" + a.dataset.cite); }
   if (!el) return;
   closeDrawer();
+  if (window.innerWidth < 1240) closeChat();
   el.scrollIntoView({ behavior: "smooth", block: "center" });
   el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1800);
 });
@@ -782,6 +933,7 @@ function renderKeys(note = "") {
 }
 function refreshReady() {
   $("#diveBtn").disabled = state.busy || !canDive();
+  renderChat();
   if (state.busy) return;
   const miss = missingKeys();
   if (!server.ok) return;

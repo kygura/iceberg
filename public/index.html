@@ -107,6 +107,25 @@
   </div>
 </section>
 
+<button class="chat-launch" id="chatLaunch" type="button" aria-controls="chat" aria-expanded="false" hidden>Ask about the findings</button>
+<aside class="chat" id="chat" aria-label="Ask about the findings" hidden>
+  <div class="chat-head">
+    <div class="chat-title">
+      <b>Ask about the findings</b>
+      <span class="chat-meta" id="chatMeta"></span>
+    </div>
+    <button class="linkish chat-clear" id="chatClear" type="button" hidden>Clear</button>
+    <button class="xbtn" id="chatClose" type="button" aria-label="Close the chat">×</button>
+  </div>
+  <div class="chat-log" id="chatLog" role="log" aria-live="polite"></div>
+  <form class="chat-form" id="chatForm" autocomplete="off">
+    <textarea id="chatInput" rows="1" maxlength="4000" placeholder="Ask about these findings" aria-label="Your question"></textarea>
+    <button class="btn primary" id="chatSend" type="submit">Ask</button>
+    <button class="btn" id="chatStop" type="button" hidden>Stop</button>
+  </form>
+  <p class="chat-foot" id="chatFoot">Claude answers from this iceberg's entries and sources, and says when they don't cover something.</p>
+</aside>
+
 <div class="scrim" id="scrim" hidden></div>
 <div class="modal" id="drawer" role="dialog" aria-modal="true" aria-labelledby="dTitle" hidden>
   <div class="dhead">

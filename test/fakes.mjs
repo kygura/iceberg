@@ -41,6 +41,7 @@ export function fakeDeps({ exaFails = null, chartFailsAt = -1, slowMs = 0 } = {}
     },
     async stream(prompt, { onText, signal } = {}) {
       calls.stream++;
+      calls.streamPrompts = [...(calls.streamPrompts || []), prompt];
       await wait(signal);
       for (const piece of ["**Deep** text with a cite [1].", "\n\nSecond paragraph [2].", "\nRabbit holes: Alpha | Beta | Gamma"]) onText(piece);
       return { truncated: false };

@@ -16,6 +16,9 @@
     },
     "api/owner.mjs": {
       "maxDuration": 10
+    },
+    "api/chat.mjs": {
+      "maxDuration": 120
     }
   },
   "headers": [

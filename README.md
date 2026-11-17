@@ -46,6 +46,12 @@ Entries get smaller and quieter level by level. Searches saved before level 6 ex
 Sources are ranked by how close they are to the original (`public/provenance.js`): official records (government, courts, legislation, patents), then archives, libraries and museums, scholarship, reference works, press, other sites, and video last. Claude is told to cite the closest source, and the server sorts each entry's citations by that rank. Media follows the same order: document scans and archival photos before decorative images, official or archival footage before other video.
 5. **Dig deeper** on an entry fetches the cited pages in full and streams a longer write-up with citations and follow-up topics.
 
+## Asking about the findings
+
+Once a level is charted, **Ask about the findings** opens a sidebar chat. Each question sends Claude a digest of the iceberg (`public/digest.js`): every level and entry with its confidence and cited source numbers, any Dig deeper write-ups, and the source list with titles, sites, provenance labels and short excerpts. The Voynich example's digest is about 13,000 characters (29 entries, 19 sources); a full dive with 70 entries and 150 sources comes to roughly 90,000. Above 120,000, excerpts and write-ups are shortened before any entry is cut. The digest goes in a cached system prompt, so follow-up questions in the same conversation reuse it.
+
+Claude answers from the digest, cites sources as [n], and links entries it mentions; clicking one opens that entry. It says when the findings don't cover a question and points to Dig deeper or a new iceberg. The chat needs only an Anthropic key, and each conversation is saved with its iceberg.
+
 The Quick / Thorough / Deepest setting maps to Claude's `low` / `medium` / `high` effort. Requests use the API's server-side refusal fallback, so a declined request is retried on a fallback model instead of failing.
 
 ## Cost
@@ -74,9 +80,10 @@ On Vercel the server's keys are never used unless `ALLOW_PUBLIC=1`, so a public 
 ## Layout
 
 ```
-server.mjs          HTTP server: static files, /api/dive and /api/deep (NDJSON streams), /api/health
+server.mjs          HTTP server: static files, /api/dive, /api/deep and /api/chat (NDJSON streams), /api/health
 lib/pipeline.mjs    dive and deep-dive orchestration, prompts
 public/editor.js    the notes editor (Tiptap), Markdown export
+public/digest.js    the compact text of an iceberg that the chat sends to Claude
 public/vendor/      prebuilt Tiptap bundle; regenerate with `npm run vendor`
 lib/claude.mjs      Anthropic SDK calls and output schemas
 lib/exa.mjs         Exa search and page contents

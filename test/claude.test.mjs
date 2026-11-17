@@ -79,3 +79,16 @@ test("stream() forwards text deltas", async () => {
   assert.equal(seen[0].body.output_config.effort, "low");
   assert.equal(seen[0].body.stream, true);
 });
+
+test("stream() with a conversation sends a cached system prompt and the turns", async () => {
+  seen = [];
+  const claude = createClaude({ client: client() });
+  let text = "";
+  await claude.stream({ system: "FINDINGS", messages: [{ role: "user", content: "Q1" }, { role: "assistant", content: "A1" }, { role: "user", content: "Q2" }] },
+    { depth: "thorough", maxTokens: 16000, onText: (d) => { text += d; } });
+  const { body } = seen[0];
+  assert.deepEqual(body.system, [{ type: "text", text: "FINDINGS", cache_control: { type: "ephemeral" } }]);
+  assert.equal(body.messages.length, 3);
+  assert.equal(body.max_tokens, 16000);
+  assert.ok(text.length);
+});
