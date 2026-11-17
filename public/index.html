@@ -61,13 +61,11 @@
         <button type="button" data-cmd="link" aria-label="Link">Link</button>
       </div>
       <div class="note-foot">
-        <label class="tier"><span class="sr">Effort</span>
-          <select id="tier" aria-label="How hard Claude thinks">
-            <option value="quick">Quick</option>
-            <option value="thorough" selected>Thorough</option>
-            <option value="deep">Deepest</option>
-          </select>
-        </label>
+        <div class="effort" id="effort">
+          <input type="hidden" id="tier" value="thorough">
+          <button class="effort-btn" id="effortBtn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="effortMenu" aria-label="Effort"><span class="lbl">Thorough</span></button>
+          <div class="effort-menu" id="effortMenu" role="listbox" aria-label="Effort" hidden></div>
+        </div>
         <span class="kbd" id="kbdHint" aria-hidden="true"></span>
         <button class="btn-dive" id="diveBtn" type="button">Research</button>
         <button class="btn-stop" id="stopBtn" type="button" hidden>Stop</button>

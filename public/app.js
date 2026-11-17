@@ -393,14 +393,58 @@ function placeCaretEnd(el) {
   el.focus(); const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
   const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
 }
+/* ===== Effort menu: custom dropdown, value kept in the hidden #tier input ===== */
+const TIERS = [
+  { v: "quick", t: "Quick", d: "Fast, lighter reading" },
+  { v: "thorough", t: "Thorough", d: "The default" },
+  { v: "deep", t: "Deepest", d: "Slowest, most careful" },
+];
+const effortOpen = () => !$("#effortMenu").hidden;
+function setTier(v) {
+  const t = TIERS.find((x) => x.v === v) || TIERS[1];
+  $("#tier").value = t.v;
+  $("#effortBtn .lbl").textContent = t.t;
+  for (const o of $("#effortMenu").children) o.setAttribute("aria-selected", String(o.dataset.v === t.v));
+}
+function closeEffort(refocus) {
+  $("#effortMenu").hidden = true; $("#effortBtn").setAttribute("aria-expanded", "false");
+  if (refocus) $("#effortBtn").focus();
+}
+function openEffort() {
+  if (state.busy) return;
+  $("#effortMenu").hidden = false; $("#effortBtn").setAttribute("aria-expanded", "true");
+  const cur = [...$("#effortMenu").children].find((o) => o.dataset.v === $("#tier").value) || $("#effortMenu").firstChild;
+  cur.focus();
+}
+function pickTier(v) { setTier(v); closeEffort(true); }
+(function setupEffort() {
+  const menu = $("#effortMenu"), btn = $("#effortBtn");
+  btn.append(svg("chev"));
+  menu.append(...TIERS.map((t) => h("div", { class: "effort-opt", role: "option", tabindex: "-1", "data-v": t.v, "aria-selected": "false", onclick: () => pickTier(t.v) },
+    h("span", { class: "t", text: t.t }), h("span", { class: "m", text: t.d }))));
+  setTier($("#tier").value);
+  btn.addEventListener("click", () => (effortOpen() ? closeEffort() : openEffort()));
+  btn.addEventListener("keydown", (ev) => { if (ev.key === "ArrowDown" || ev.key === "ArrowUp") { ev.preventDefault(); openEffort(); } });
+  menu.addEventListener("keydown", (ev) => {
+    const opts = [...menu.children], i = opts.indexOf(document.activeElement);
+    if (ev.key === "ArrowDown") { ev.preventDefault(); opts[Math.min(i + 1, opts.length - 1)].focus(); }
+    else if (ev.key === "ArrowUp") { ev.preventDefault(); opts[Math.max(i - 1, 0)].focus(); }
+    else if (ev.key === "Home") { ev.preventDefault(); opts[0].focus(); }
+    else if (ev.key === "End") { ev.preventDefault(); opts[opts.length - 1].focus(); }
+    else if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); if (i >= 0) pickTier(opts[i].dataset.v); }
+    else if (ev.key === "Tab") closeEffort();
+  });
+  document.addEventListener("click", (ev) => { if (effortOpen() && !$("#effort").contains(ev.target)) closeEffort(); });
+})();
+
 const notesEd = createNotesEditor({
   el: $("#notes"), bubble: $("#bubble"), slash: $("#slash"),
   placeholder: "Add notes to steer the research: an angle, a period, sources you trust, what to skip. Type / for commands.",
   actions: [
     { key: "research", t: "Research", d: "Start the search now", k: "", run: () => $("#diveBtn").click() },
-    { key: "quick", t: "Quick", d: "Fast, lighter reading", run: () => { $("#tier").value = "quick"; } },
-    { key: "thorough", t: "Thorough", d: "The default", run: () => { $("#tier").value = "thorough"; } },
-    { key: "deepest", t: "Deepest", d: "Slowest, most careful", run: () => { $("#tier").value = "deep"; } },
+    { key: "quick", t: "Quick", d: "Fast, lighter reading", run: () => { setTier("quick"); } },
+    { key: "thorough", t: "Thorough", d: "The default", run: () => { setTier("thorough"); } },
+    { key: "deepest", t: "Deepest", d: "Slowest, most careful", run: () => { setTier("deep"); } },
     { key: "example", t: "Open the example", d: "The Voynich manuscript", run: () => show(EXAMPLE) },
     { key: "new", t: "New search", d: "Clear this page", run: () => newNote() },
   ],
@@ -436,6 +480,7 @@ function setStatus(text, kind) {
 function setProgress() { $("#barFill").style.width = Math.round((prog.done / prog.total) * 100) + "%"; }
 function setBusy(b) {
   state.busy = b;
+  $("#effort").classList.toggle("off", b); if (b) closeEffort();
   $("#diveBtn").disabled = b || !canDive();
   $("#diveBtn").hidden = b;
   $("#stopBtn").hidden = !b;
@@ -707,7 +752,7 @@ $("#dClose").addEventListener("click", closeDrawer);
 $("#scrim").addEventListener("click", closeDrawer);
 $("#lbClose").addEventListener("click", closeLightbox);
 $("#lightbox").addEventListener("click", (ev) => { if (ev.target.id === "lightbox") closeLightbox(); });
-document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { if (!$("#slash").hidden) return; if ($("#keys").open) $("#keys").open = false; else if ($("#saved")?.open) closeSaved(); else if (!$("#lightbox").hidden) closeLightbox(); else closeDrawer(); } });
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { if (!$("#slash").hidden) return; if (effortOpen()) { closeEffort(true); return; } if ($("#keys").open) $("#keys").open = false; else if ($("#saved")?.open) closeSaved(); else if (!$("#lightbox").hidden) closeLightbox(); else closeDrawer(); } });
 document.addEventListener("click", (ev) => {
   const a = ev.target.closest("a.cite");
   if (!a) return;
