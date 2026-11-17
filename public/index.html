@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Iceberg Sounder</title>
-<meta name="description" content="Search a topic and sort what's known about it into six levels, from common knowledge to contested claims, with sources for every entry.">
+<meta name="description" content="Search a topic and sort what's known about it into seven levels, from common knowledge down through the records and the forgotten material to contested claims, with sources for every entry.">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -61,13 +61,11 @@
         <button type="button" data-cmd="link" aria-label="Link">Link</button>
       </div>
       <div class="note-foot">
-        <label class="tier"><span class="sr">Effort</span>
-          <select id="tier" aria-label="How hard Claude thinks">
-            <option value="quick">Quick</option>
-            <option value="thorough" selected>Thorough</option>
-            <option value="deep">Deepest</option>
-          </select>
-        </label>
+        <div class="effort" id="effort">
+          <input type="hidden" id="tier" value="thorough">
+          <button class="effort-btn" id="effortBtn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="effortMenu" aria-label="Effort"><span class="lbl">Thorough</span></button>
+          <div class="effort-menu" id="effortMenu" role="listbox" aria-label="Effort" hidden></div>
+        </div>
         <span class="kbd" id="kbdHint" aria-hidden="true"></span>
         <button class="btn-dive" id="diveBtn" type="button">Research</button>
         <button class="btn-stop" id="stopBtn" type="button" hidden>Stop</button>
@@ -84,7 +82,7 @@
 
 <main class="chart" aria-label="Iceberg chart">
   <div class="wrap chart-head">
-    <p>Six levels, from common knowledge to contested claims.</p>
+    <p>Seven levels, from what everyone has heard down to what nobody can settle.</p>
     <div class="legend" aria-label="How entries are marked">
       <span class="s-est">Established</span>
       <span class="s-deb">Debated</span>
@@ -103,11 +101,30 @@
     <ol class="sources" id="sources"></ol>
     <button class="btn more" id="srcMore" type="button" hidden></button>
     <div class="how">
-      <div><b>How it works.</b> Claude writes three web searches for each level, at least one aimed at an official record, plus one search for the topic's primary documents, and Exa runs them. Claude then sorts the results into levels using only what those pages say. Each entry cites the closest source first: official records, then archives, scholarship, reference works, press, other sites and video, in that order. <b>Dig deeper</b> has Claude read an entry's cited pages in full.</div>
+      <div><b>How it works.</b> Claude writes five web searches for each level, at least two aimed at official records, plus one search for the topic's primary documents, and Exa runs them. Claude reads each level's results and names the leads worth chasing (people, documents, cases they mention), and those get a second round of searches. Claude then sorts the results into levels using only what those pages say. Each entry cites the closest source first: official records, then archives, scholarship, reference works, press, other sites and video, in that order. <b>Dig deeper</b> has Claude read an entry's cited pages in full.</div>
       <div>Images and videos come from the cited pages, Wikimedia Commons (credited with author and license), YouTube and Vimeo. Icebergs you make are saved in this browser only.</div>
     </div>
   </div>
 </section>
+
+<button class="chat-launch" id="chatLaunch" type="button" aria-controls="chat" aria-expanded="false" hidden>Ask about the findings</button>
+<aside class="chat" id="chat" aria-label="Ask about the findings" hidden>
+  <div class="chat-head">
+    <div class="chat-title">
+      <b>Ask about the findings</b>
+      <span class="chat-meta" id="chatMeta"></span>
+    </div>
+    <button class="linkish chat-clear" id="chatClear" type="button" hidden>Clear</button>
+    <button class="xbtn" id="chatClose" type="button" aria-label="Close the chat">×</button>
+  </div>
+  <div class="chat-log" id="chatLog" role="log" aria-live="polite"></div>
+  <form class="chat-form" id="chatForm" autocomplete="off">
+    <textarea id="chatInput" rows="1" maxlength="4000" placeholder="Ask about these findings" aria-label="Your question"></textarea>
+    <button class="btn primary" id="chatSend" type="submit">Ask</button>
+    <button class="btn" id="chatStop" type="button" hidden>Stop</button>
+  </form>
+  <p class="chat-foot" id="chatFoot">Claude answers from this iceberg's entries and sources, and says when they don't cover something.</p>
+</aside>
 
 <div class="scrim" id="scrim" hidden></div>
 <div class="modal" id="drawer" role="dialog" aria-modal="true" aria-labelledby="dTitle" hidden>

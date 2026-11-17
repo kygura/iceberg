@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createClaude, modelId } from "./lib/claude.mjs";
 import { createExa } from "./lib/exa.mjs";
 import { createCommons } from "./lib/commons.mjs";
-import { runDive, runDeep, findEntryMedia } from "./lib/pipeline.mjs";
+import { runDive, runDeep, runChat, findEntryMedia } from "./lib/pipeline.mjs";
 import { publicError } from "./lib/errors.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -107,13 +107,13 @@ export function createHandler(deps, {
   };
 
   /* The deps for one request, or an error to send back. */
-  function depsFor(req) {
+  function depsFor(req, { needExa = true } = {}) {
     const ak = keyHeader(req, "x-anthropic-key"), ek = keyHeader(req, "x-exa-key");
     if ((ak && !KEY_RE.test(ak)) || (ek && !KEY_RE.test(ek))) return { status: 400, error: { code: "bad_key", message: "That doesn't look like an API key. Check what you pasted under Keys." } };
     const srv = serverFor(req);
     const claude = ak ? makeClaude(ak) : srv.claude ? deps.claude : null;
     const exa = ek ? makeExa(ek) : srv.exa ? deps.exa : null;
-    const missing = [!claude && "Anthropic", !exa && "Exa"].filter(Boolean);
+    const missing = [!claude && "Anthropic", needExa && !exa && "Exa"].filter(Boolean);
     if (missing.length) return { status: 401, error: { code: "keys_needed", missing, message: `Add your ${missing.join(" and ")} API key${missing.length > 1 ? "s" : ""} under Keys to search.` } };
     return { deps: { ...deps, claude, exa }, userKeys: Boolean(ak || ek) };
   }
@@ -137,8 +137,8 @@ export function createHandler(deps, {
       }
 
       let ctx = null;
-      if (req.method === "POST" && /^\/api\/(dive|deep|media)$/.test(url.pathname)) {
-        ctx = depsFor(req);
+      if (req.method === "POST" && /^\/api\/(dive|deep|media|chat)$/.test(url.pathname)) {
+        ctx = depsFor(req, { needExa: url.pathname !== "/api/chat" });
         if (ctx.error) return send(res, ctx.status, { error: ctx.error });
       }
       /* With a visitor's keys, point key errors at the Keys panel instead of .env. */
@@ -176,11 +176,27 @@ export function createHandler(deps, {
         const topic = clean(body.topic, 160);
         const depth = DEPTHS.has(body.depth) ? body.depth : "thorough";
         const entry = { term: clean(body.entry?.term, 120), summary: clean(body.entry?.summary, 600), detail: clean(body.entry?.detail, 1500) };
-        const sources = (Array.isArray(body.sources) ? body.sources : []).slice(0, 3)
+        const sources = (Array.isArray(body.sources) ? body.sources : []).slice(0, 5)
           .map((s) => ({ id: Number(s.id) || 0, title: clean(s.title, 300), url: clean(s.url, 1000), excerpt: clean(s.excerpt, 400) }))
           .filter((s) => /^https?:\/\//.test(s.url));
         if (!topic || !entry.term || !sources.length) return send(res, 400, { error: { code: "bad_request", message: "Missing entry or sources." } });
         return ndjson(req, res, (emit, signal) => runDeep({ topic, entry, sources, depth, emit: wrapEmit(emit), signal, deps: ctx.deps }));
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/chat") {
+        const body = await readJson(req, 512 * 1024);
+        const topic = clean(body.topic, 160);
+        const depth = DEPTHS.has(body.depth) ? body.depth : "thorough";
+        const digest = typeof body.digest === "string" ? body.digest.replace(/\r\n?/g, "\n").slice(0, 160000) : "";
+        // The last 20 turns, alternating, ending on the user's question.
+        const messages = (Array.isArray(body.messages) ? body.messages : [])
+          .map((m) => ({ role: m?.role === "assistant" ? "assistant" : "user", text: cleanNotes(m?.text, 8000) }))
+          .filter((m) => m.text).slice(-20);
+        while (messages.length && messages[0].role !== "user") messages.shift();
+        const alternates = messages.every((m, i) => m.role === (i % 2 ? "assistant" : "user"));
+        if (!topic || !digest || !messages.length || messages.at(-1).role !== "user" || !alternates)
+          return send(res, 400, { error: { code: "bad_request", message: "Missing the findings or a question." } });
+        return ndjson(req, res, (emit, signal) => runChat({ topic, digest, messages, depth, emit: wrapEmit(emit), signal, deps: ctx.deps }));
       }
 
       if (req.method === "GET" || req.method === "HEAD") {

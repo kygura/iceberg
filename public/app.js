@@ -1,7 +1,8 @@
-import { ZONES as ZONE_TEXT } from "./zones.js";
+import { ZONES as ZONE_TEXT, LEVELS } from "./zones.js";
 import { EXAMPLE } from "./example.js";
 import { createNotesEditor } from "./editor.js";
 import { tierOf, rankOf, labelOf } from "./provenance.js";
+import { digestOf, digestStats } from "./digest.js";
 
 const ZONES = ZONE_TEXT;
 
@@ -146,7 +147,7 @@ function renderHero() {
       h("span", {}, h("b", { text: String(entries) }), " entries"),
       h("span", {}, h("b", { text: String(ice.sources.length) }), " sources"),
       h("span", {}, h("b", { text: String(media) }), " with images or video"),
-      h("span", {}, h("b", { text: `${done}/6` }), " levels charted"))].filter(Boolean));
+      h("span", {}, h("b", { text: `${done}/${LEVELS}` }), " levels charted"))].filter(Boolean));
 }
 
 /* One image per entry, drawn from its media. Prefer an image no other
@@ -183,27 +184,28 @@ function levelEl(i) {
       "aria-label": `${e.term}. ${e.confidence || "established"}, ${e.sources.length} source${e.sources.length === 1 ? "" : "s"}`,
       onclick: () => openEntry(i, k),
     }, entryThumb(e, thumbs.get(i + ":" + k)), h("span", { class: "et" }, e.term, e.sources.length ? h("sup", { text: String(e.sources.length) }) : null)));
-  } else if (["pending", "searching", "charting"].includes(layer.status)) {
-    inner = [5, 8, 4, 7].map((w) => h("span", { class: "skel", style: `width:${w}em` }));
+  } else if (["pending", "searching", "following", "charting"].includes(layer.status)) {
+    inner = [5, 8, 4, 7, 6, 9, 5, 7].map((w) => h("span", { class: "skel", style: `width:${w}em` }));
   } else if (layer.status === "error") {
     inner = [h("span", { class: "note bad", text: layer.error || "This level couldn't be charted." })];
   } else {
-    inner = [h("span", { class: "note", text: "No results at this level." })];
+    inner = [h("span", { class: "note", text: layer.missing ? "This level was added after this search was saved. Run it again to fill it." : "No results at this level." })];
   }
-  const busy = layer.status === "searching" || layer.status === "charting";
+  const busy = ["searching", "following", "charting"].includes(layer.status);
   const cited = new Set(layer.entries.flatMap((e) => e.sources)).size;
   const count = {
-    pending: "waiting", searching: "searching the web", charting: "reading results",
+    pending: "waiting", searching: "searching the web", following: "following leads", charting: "reading results",
     done: `${layer.entries.length} entries · ${cited} sources`, error: "failed", empty: "no results",
   }[layer.status] || "";
 
   return h("section", { class: "level", id: "lv-" + z.key, "data-level": String(z.level), "aria-label": `Level ${z.level}: ${z.name}` },
     h("div", { class: "level-in" },
     h("div", { class: "rail" },
-      h("span", { class: "num", text: `${String(z.level).padStart(2, "0")} / 06` }),
+      h("span", { class: "num" }, h("span", { text: `Level ${z.level}` }), h("span", { class: "depth", text: z.depth })),
       h("span", { class: "name", text: z.name }),
+      h("span", { class: "label", text: z.label }),
       !layer.theme && layer.status === "pending" && state.busy ? h("span", { class: "theme" }, h("span", { class: "skel", style: "width:11em" }))
-        : h("span", { class: "theme", text: layer.theme || z.short }),
+        : layer.theme ? h("span", { class: "theme", text: layer.theme }) : null,
       h("span", { class: "count" + (busy ? " busy" : ""), text: count })),
     h("div", { class: "entries" }, inner),
     levelMedia(i)));
@@ -232,7 +234,7 @@ function levelMedia(i) {
 function renderBand(i) { const old = document.getElementById("lv-" + ZONES[i].key); const el = levelEl(i); if (old) old.replaceWith(el); else $("#levels").append(el); renderLvNav(); }
 function renderOcean() { $("#levels").replaceChildren(...ZONES.map((_, i) => levelEl(i))); renderLvNav(); }
 
-/* Phones: a sticky bar of the six levels, marking the one on screen. */
+/* Phones: a sticky bar of the levels, marking the one on screen. */
 function renderLvNav() {
   const ice = state.ice;
   $("#lvnav").replaceChildren(...ZONES.map((z, i) => h("button", {
@@ -347,12 +349,21 @@ function renderAll() {
   const empty = !state.ice;
   document.body.classList.toggle("empty", empty);
   $("main.chart").hidden = empty; $("section.appendix").hidden = empty;
-  renderHero(); renderRecent();
+  renderHero(); renderRecent(); renderChat();
   if (empty) { $("#levels").replaceChildren(); $("#lvnav").replaceChildren(); $("#sources").replaceChildren(); return; }
   renderOcean(); renderSeabed();
 }
+/* Older saves have six levels; line their layers up with the current levels by key. */
+function withAllLevels(ice) {
+  if (!ice || (ice.layers.length === LEVELS && ice.layers.every((l, i) => l.key === ZONES[i].key))) return ice;
+  const layers = ZONES.map((z) => ice.layers.find((l) => l.key === z.key)
+    || { key: z.key, status: "empty", entries: [], theme: "", missing: true });
+  return Object.assign(ice, { layers });
+}
 function show(ice) {
   if (state.busy) return;
+  withAllLevels(ice);
+  chatCtl?.abort(); chatCtl = null;
   state.ice = ice; state.allSources = false; closeDrawer();
   if (ice) setNote(ice.topic || ice.title, ice.notesDoc || ice.notes || ""); else { const d = loadDraft(); setNote(d.topic, d.doc); }
   renderAll(); window.scrollTo({ top: 0 });
@@ -384,14 +395,58 @@ function placeCaretEnd(el) {
   el.focus(); const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
   const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
 }
+/* ===== Effort menu: custom dropdown, value kept in the hidden #tier input ===== */
+const TIERS = [
+  { v: "quick", t: "Quick", d: "Fast, lighter reading" },
+  { v: "thorough", t: "Thorough", d: "The default" },
+  { v: "deep", t: "Deepest", d: "Slowest, most careful" },
+];
+const effortOpen = () => !$("#effortMenu").hidden;
+function setTier(v) {
+  const t = TIERS.find((x) => x.v === v) || TIERS[1];
+  $("#tier").value = t.v;
+  $("#effortBtn .lbl").textContent = t.t;
+  for (const o of $("#effortMenu").children) o.setAttribute("aria-selected", String(o.dataset.v === t.v));
+}
+function closeEffort(refocus) {
+  $("#effortMenu").hidden = true; $("#effortBtn").setAttribute("aria-expanded", "false");
+  if (refocus) $("#effortBtn").focus();
+}
+function openEffort() {
+  if (state.busy) return;
+  $("#effortMenu").hidden = false; $("#effortBtn").setAttribute("aria-expanded", "true");
+  const cur = [...$("#effortMenu").children].find((o) => o.dataset.v === $("#tier").value) || $("#effortMenu").firstChild;
+  cur.focus();
+}
+function pickTier(v) { setTier(v); closeEffort(true); }
+(function setupEffort() {
+  const menu = $("#effortMenu"), btn = $("#effortBtn");
+  btn.append(svg("chev"));
+  menu.append(...TIERS.map((t) => h("div", { class: "effort-opt", role: "option", tabindex: "-1", "data-v": t.v, "aria-selected": "false", onclick: () => pickTier(t.v) },
+    h("span", { class: "t", text: t.t }), h("span", { class: "m", text: t.d }))));
+  setTier($("#tier").value);
+  btn.addEventListener("click", () => (effortOpen() ? closeEffort() : openEffort()));
+  btn.addEventListener("keydown", (ev) => { if (ev.key === "ArrowDown" || ev.key === "ArrowUp") { ev.preventDefault(); openEffort(); } });
+  menu.addEventListener("keydown", (ev) => {
+    const opts = [...menu.children], i = opts.indexOf(document.activeElement);
+    if (ev.key === "ArrowDown") { ev.preventDefault(); opts[Math.min(i + 1, opts.length - 1)].focus(); }
+    else if (ev.key === "ArrowUp") { ev.preventDefault(); opts[Math.max(i - 1, 0)].focus(); }
+    else if (ev.key === "Home") { ev.preventDefault(); opts[0].focus(); }
+    else if (ev.key === "End") { ev.preventDefault(); opts[opts.length - 1].focus(); }
+    else if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); if (i >= 0) pickTier(opts[i].dataset.v); }
+    else if (ev.key === "Tab") closeEffort();
+  });
+  document.addEventListener("click", (ev) => { if (effortOpen() && !$("#effort").contains(ev.target)) closeEffort(); });
+})();
+
 const notesEd = createNotesEditor({
   el: $("#notes"), bubble: $("#bubble"), slash: $("#slash"),
   placeholder: "Add notes to steer the research: an angle, a period, sources you trust, what to skip. Type / for commands.",
   actions: [
     { key: "research", t: "Research", d: "Start the search now", k: "", run: () => $("#diveBtn").click() },
-    { key: "quick", t: "Quick", d: "Fast, lighter reading", run: () => { $("#tier").value = "quick"; } },
-    { key: "thorough", t: "Thorough", d: "The default", run: () => { $("#tier").value = "thorough"; } },
-    { key: "deepest", t: "Deepest", d: "Slowest, most careful", run: () => { $("#tier").value = "deep"; } },
+    { key: "quick", t: "Quick", d: "Fast, lighter reading", run: () => { setTier("quick"); } },
+    { key: "thorough", t: "Thorough", d: "The default", run: () => { setTier("thorough"); } },
+    { key: "deepest", t: "Deepest", d: "Slowest, most careful", run: () => { setTier("deep"); } },
     { key: "example", t: "Open the example", d: "The Voynich manuscript", run: () => show(EXAMPLE) },
     { key: "new", t: "New search", d: "Clear this page", run: () => newNote() },
   ],
@@ -427,6 +482,7 @@ function setStatus(text, kind) {
 function setProgress() { $("#barFill").style.width = Math.round((prog.done / prog.total) * 100) + "%"; }
 function setBusy(b) {
   state.busy = b;
+  $("#effort").classList.toggle("off", b); if (b) closeEffort();
   $("#diveBtn").disabled = b || !canDive();
   $("#diveBtn").hidden = b;
   $("#stopBtn").hidden = !b;
@@ -447,7 +503,7 @@ async function build(topic, notes = "", notesDoc = null) {
   const ice = { id: "ice-" + Date.now().toString(36), topic, notes, notesDoc: notes ? notesDoc : null, title: topic, summary: "", createdAt: Date.now(), sources: [],
     layers: ZONES.map((z) => ({ key: z.key, status: "pending", entries: [], theme: "" })) };
   state.ice = ice; closeDrawer(); setBusy(true); renderAll();
-  prog.total = 1 + 6 * 2; prog.done = 0;
+  prog.total = 1 + LEVELS * 3; prog.done = 0;
   setStatus(`Planning searches for “${topic}”…`, "busy");
   let finished = false;
   try {
@@ -468,11 +524,12 @@ async function build(topic, notes = "", notesDoc = null) {
         l.status = ev.status;
         if (ev.entries) l.entries = ev.entries;
         if (ev.error) l.error = ev.error;
-        if (["done", "empty", "error"].includes(ev.status)) prog.done += 2; else if (ev.status === "charting") prog.done += 1;
-        setProgress(); renderBand(ev.index); renderHero();
+        const step = { following: 1, charting: 2, done: 3, empty: 3, error: 3 }[ev.status] || 0;
+        if (step > (l.steps || 0)) { prog.done += step - (l.steps || 0); l.steps = step; }
+        setProgress(); renderBand(ev.index); renderHero(); renderChat();
       } else if (ev.type === "done") {
         finished = true;
-        setStatus(ev.charted ? `Charted ${ev.charted} of 6 levels from ${ev.sources} sources.` : "No level could be charted. Try a more specific topic.", ev.charted ? null : "err");
+        setStatus(ev.charted ? `Charted ${ev.charted} of ${LEVELS} levels, ${countEntries(ice)} entries, from ${ev.sources} sources.` : "No level could be charted. Try a more specific topic.", ev.charted ? null : "err");
       } else if (ev.type === "error") {
         finished = true;
         setStatus(ev.error?.message || "The dive failed.", "err");
@@ -483,7 +540,7 @@ async function build(topic, notes = "", notesDoc = null) {
     if (ctl.signal.aborted || e?.name === "AbortError") setStatus("Stopped. Finished levels are kept.");
     else setStatus(e?.message || "Couldn't reach the server. Is it still running?", "err");
   } finally {
-    ice.layers.forEach((l, i) => { if (["pending", "searching", "charting"].includes(l.status)) { l.status = "error"; l.error = "Stopped before this level was reached."; renderBand(i); } });
+    ice.layers.forEach((l, i) => { delete l.steps; if (["pending", "searching", "following", "charting"].includes(l.status)) { l.status = "error"; l.error = "Stopped before this level was reached."; renderBand(i); } });
     if (buildCtl === ctl) buildCtl = null;
     setBusy(false); renderSeabed();
     if (ice.layers.some((l) => l.entries.length)) saveHistory(ice);
@@ -582,7 +639,7 @@ function openEntry(li, ei, mediaId) {
   const ice = state.ice; const e = ice.layers[li].entries[ei]; const z = ZONES[li];
   state.open = { li, ei };
   if ($("#drawer").hidden) lastFocus = document.activeElement;
-  $("#dZone").replaceChildren(h("span", { text: `Level ${z.level} of 6` }), h("b", { text: z.name }));
+  $("#dZone").replaceChildren(h("span", { text: `Level ${z.level} of ${LEVELS} · ${z.depth}` }), h("b", { text: z.name }));
   document.querySelectorAll(".entry.open").forEach((el) => el.classList.remove("open"));
   document.querySelectorAll(`#lv-${z.key} .entry`)[ei]?.classList.add("open");
   const srcs = byCloseness(e.sources.map((id) => sourceById(ice, id)).filter(Boolean));
@@ -639,7 +696,7 @@ function splitHoles(text) {
 async function digDeeper(ice, e, ui) {
   deepCtl?.abort();
   const ctl = deepCtl = new AbortController();
-  const srcs = byCloseness(e.sources.map((id) => sourceById(ice, id)).filter(Boolean)).slice(0, 3);
+  const srcs = byCloseness(e.sources.map((id) => sourceById(ice, id)).filter(Boolean)).slice(0, 5);
   ui.digBtn.disabled = true; ui.stopBtn.hidden = false; ui.deepErr.hidden = true;
   ui.deepBox.hidden = false; ui.holesBox.replaceChildren();
   ui.deepBox.innerHTML = `<p class="think">Starting…</p>`;
@@ -674,6 +731,154 @@ async function digDeeper(ice, e, ui) {
   }
 }
 
+/* ===== Chat about the findings ===== */
+/* A sidebar where the reader asks Claude about this iceberg. Each request sends
+   a compact digest of the chart (see digest.js) plus the conversation so far.
+   The conversation is kept on the iceberg, so it is saved with it. */
+let chatCtl = null;
+const chatOpen = () => !$("#chat").hidden;
+const canChat = () => server.ok && (!!userKeys.anthropic || server.claude);
+const chatReady = (ice) => !!ice && ice.layers.some((l) => l.entries.length);
+const STARTERS = [
+  "Which entries are best documented, and by which kind of source?",
+  "What is contested here, and what does each side point to?",
+  "Which entries rest on a single source or a weak one?",
+  "Walk me from the top level to the bottom in a few paragraphs.",
+];
+/* Finds an entry by its printed term, for [[Term]] links in answers. */
+function findEntry(ice, term) {
+  const t = term.trim().toLowerCase();
+  for (const [li, l] of ice.layers.entries()) {
+    const ei = l.entries.findIndex((e) => e.term.trim().toLowerCase() === t);
+    if (ei >= 0) return { li, ei };
+  }
+  return null;
+}
+/* Answers: paragraphs, short lists, **bold**, [n] citations and [[Term]] entry links. */
+function chatMd(text, ice) {
+  const inline = (line) => esc(line)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\[\[([^\]\n]{1,140})\]\]/g, (m, term) => {
+      const at = findEntry(ice, term.replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"'));
+      return at ? `<a href="#lv-${ZONES[at.li].key}" class="chat-entry" role="button" data-li="${at.li}" data-ei="${at.ei}">${term}</a>` : term;
+    })
+    .replace(/\[(\d{1,4})\]/g, (m, n) => (ice.sources.some((x) => x.id === +n) ? `<a class="cite" href="#src-${n}" data-cite="${n}">[${n}]</a>` : m));
+  // Within a block, consecutive list lines become one list; other lines a paragraph.
+  const kindOf = (l) => (/^\s*[-*]\s+/.test(l) ? "ul" : /^\s*\d+[.)]\s+/.test(l) ? "ol" : "p");
+  return String(text).trim().split(/\n{2,}/).filter(Boolean).map((block) => {
+    const runs = [];
+    for (const l of block.split("\n").filter((x) => x.trim())) {
+      const k = kindOf(l);
+      if (runs.length && runs.at(-1).k === k) runs.at(-1).lines.push(l); else runs.push({ k, lines: [l] });
+    }
+    return runs.map(({ k, lines }) => k === "p" ? "<p>" + lines.map(inline).join("<br>") + "</p>"
+      : `<${k}>` + lines.map((l) => "<li>" + inline(l.replace(/^\s*(?:[-*]|\d+[.)])\s+/, "")) + "</li>").join("") + `</${k}>`).join("");
+  }).join("");
+}
+function chatMsgEl(m, ice) {
+  if (m.role === "user") return h("div", { class: "chat-msg user", text: m.text });
+  const el = h("div", { class: "chat-msg bot" });
+  el.innerHTML = chatMd(m.text, ice);
+  return el;
+}
+function renderChat() {
+  const ice = state.ice; const ready = chatReady(ice);
+  $("#chatLaunch").hidden = !ready || chatOpen();
+  $("#chatLaunch").setAttribute("aria-expanded", String(chatOpen()));
+  if (!ready) { if (chatOpen()) closeChat(); return; }
+  const st = digestStats(ice);
+  $("#chatMeta").textContent = `${st.entries} entries · ${st.levels} levels · ${st.sources} sources`;
+  const log = ice.chat || [];
+  $("#chatClear").hidden = !log.length || !!chatCtl;
+  const kids = log.map((m) => chatMsgEl(m, ice));
+  if (!log.length) {
+    kids.push(h("div", { class: "chat-empty" },
+      h("p", { text: `Ask anything about ${ice.title || ice.topic}. Answers come from the ${st.entries} entries and ${st.sources} sources in this iceberg, with citations.` }),
+      h("div", { class: "chat-starters" }, STARTERS.map((q) => h("button", { class: "chip", type: "button", text: q, onclick: () => askChat(q) })))));
+  }
+  if (!canChat()) kids.push(h("div", { class: "err" }, "Asking needs an Anthropic key. ", h("button", { class: "linkish", type: "button", text: "Add it under Keys", onclick: () => { closeChat(); openKeys(); } }), "."));
+  $("#chatLog").replaceChildren(...kids);
+  $("#chatSend").disabled = !canChat() || !!chatCtl;
+  $("#chatSend").hidden = !!chatCtl; $("#chatStop").hidden = !chatCtl;
+}
+function openChat() {
+  if (!chatReady(state.ice)) return;
+  $("#chat").hidden = false; document.body.classList.add("chat-open");
+  renderChat(); scrollChat(); $("#chatInput").focus();
+}
+function closeChat() {
+  if ($("#chat").hidden) return;
+  $("#chat").hidden = true; document.body.classList.remove("chat-open");
+  renderChat(); $("#chatLaunch").focus?.();
+}
+const scrollChat = () => { const log = $("#chatLog"); log.scrollTop = log.scrollHeight; };
+function sizeChatInput() { const t = $("#chatInput"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight + 2, 160) + "px"; }
+async function askChat(question) {
+  const ice = state.ice; question = String(question || "").trim();
+  if (!question || chatCtl || !canChat() || !chatReady(ice)) return;
+  ice.chat = ice.chat || [];
+  ice.chat.push({ role: "user", text: question });
+  $("#chatInput").value = ""; sizeChatInput();
+  const ctl = chatCtl = new AbortController();
+  renderChat();
+  const bot = h("div", { class: "chat-msg bot" }, h("p", { class: "think", text: "Reading the findings…" }));
+  $("#chatLog").append(bot); scrollChat();
+  let text = "", ok = false, failed = "";
+  try {
+    const events = await postStream("/api/chat", {
+      topic: ice.title || ice.topic, depth: $("#tier").value, digest: digestOf(ice),
+      messages: ice.chat.map((m) => ({ role: m.role, text: m.text })),
+    }, ctl.signal);
+    for await (const ev of events) {
+      if (ev.type === "reset") text = "";
+      else if (ev.type === "text") {
+        const stick = $("#chatLog").scrollHeight - $("#chatLog").scrollTop - $("#chatLog").clientHeight < 40;
+        text += ev.delta; bot.innerHTML = chatMd(text, ice);
+        if (stick) scrollChat();
+      } else if (ev.type === "done") ok = true;
+      else if (ev.type === "error") failed = ev.error?.message || "The answer failed.";
+    }
+  } catch (err) {
+    if (!(ctl.signal.aborted || err?.name === "AbortError")) failed = err?.message || "Couldn't reach the server.";
+  } finally {
+    if (chatCtl === ctl) chatCtl = null;
+  }
+  if (state.ice !== ice) return;
+  if (text.trim()) {
+    // A stopped answer is kept as far as it got, so the conversation still alternates.
+    ice.chat.push({ role: "assistant", text: text.trim() + (ok ? "" : "\n\n(Stopped before the answer finished.)") });
+    if (!ice.example) saveHistory(ice);
+  } else {
+    // Nothing came back: drop the question and put it back in the box.
+    ice.chat.pop();
+    $("#chatInput").value = question; sizeChatInput();
+  }
+  renderChat(); scrollChat();
+  if (failed) { $("#chatLog").append(h("div", { class: "chat-msg bot" }, h("p", { class: "err", text: failed }))); scrollChat(); }
+}
+$("#chatLaunch").addEventListener("click", openChat);
+$("#chatClose").addEventListener("click", closeChat);
+$("#chatStop").addEventListener("click", () => chatCtl?.abort());
+$("#chatClear").addEventListener("click", () => {
+  const ice = state.ice; if (!ice || chatCtl) return;
+  ice.chat = []; if (!ice.example) saveHistory(ice); renderChat(); $("#chatInput").focus();
+});
+$("#chatForm").addEventListener("submit", (ev) => { ev.preventDefault(); askChat($("#chatInput").value); });
+$("#chatInput").addEventListener("input", sizeChatInput);
+$("#chatInput").addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); askChat($("#chatInput").value); }
+});
+$("#chatLog").addEventListener("click", (ev) => {
+  const b = ev.target.closest(".chat-entry");
+  if (!b || !state.ice) return;
+  ev.preventDefault();
+  const li = +b.dataset.li, ei = +b.dataset.ei;
+  if (!state.ice.layers[li]?.entries[ei]) return;
+  if (window.innerWidth < 1240) closeChat();
+  document.getElementById("lv-" + ZONES[li].key)?.scrollIntoView({ block: "center" });
+  openEntry(li, ei);
+});
+
 /* ===== Lightbox ===== */
 let lbReturn = null;
 function openLightbox(s) {
@@ -697,7 +902,7 @@ $("#dClose").addEventListener("click", closeDrawer);
 $("#scrim").addEventListener("click", closeDrawer);
 $("#lbClose").addEventListener("click", closeLightbox);
 $("#lightbox").addEventListener("click", (ev) => { if (ev.target.id === "lightbox") closeLightbox(); });
-document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { if (!$("#slash").hidden) return; if ($("#keys").open) $("#keys").open = false; else if ($("#saved")?.open) closeSaved(); else if (!$("#lightbox").hidden) closeLightbox(); else closeDrawer(); } });
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { if (!$("#slash").hidden) return; if (effortOpen()) { closeEffort(true); return; } if ($("#keys").open) $("#keys").open = false; else if ($("#saved")?.open) closeSaved(); else if (!$("#lightbox").hidden) closeLightbox(); else if (!$("#drawer").hidden) closeDrawer(); else if (chatOpen() && !chatCtl) closeChat(); } });
 document.addEventListener("click", (ev) => {
   const a = ev.target.closest("a.cite");
   if (!a) return;
@@ -706,6 +911,7 @@ document.addEventListener("click", (ev) => {
   if (el?.hidden) { state.allSources = true; renderSources(); el = document.getElementById("src-" + a.dataset.cite); }
   if (!el) return;
   closeDrawer();
+  if (window.innerWidth < 1240) closeChat();
   el.scrollIntoView({ behavior: "smooth", block: "center" });
   el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1800);
 });
@@ -727,6 +933,7 @@ function renderKeys(note = "") {
 }
 function refreshReady() {
   $("#diveBtn").disabled = state.busy || !canDive();
+  renderChat();
   if (state.busy) return;
   const miss = missingKeys();
   if (!server.ok) return;
