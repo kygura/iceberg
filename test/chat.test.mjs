@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runChat, chatSystem } from "../lib/pipeline.mjs";
-import { digestOf } from "../public/digest.js";
-import { ZONES } from "../public/zones.js";
+import { digestOf } from "../web/digest.js";
+import { ZONES } from "../web/zones.js";
 import { fakeDeps } from "./fakes.mjs";
 
 const ice = {

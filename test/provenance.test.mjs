@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { tierOf, rankOf } from "../public/provenance.js";
+import { tierOf, rankOf } from "../web/provenance.js";
 
 test("sources are ranked by how close they are to the original record", () => {
   const cases = {

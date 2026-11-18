@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { runDive, runDeep, findEntryMedia, isVideoUrl } from "../lib/pipeline.mjs";
 import { AppError } from "../lib/errors.mjs";
 import { fakeDeps } from "./fakes.mjs";
-import { LEVELS } from "../public/zones.js";
+import { LEVELS } from "../web/zones.js";
 
 async function collect(fn) {
   const events = [];

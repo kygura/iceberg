@@ -2,14 +2,23 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createApp, parseImage } from "../server.mjs";
 import { fakeDeps } from "./fakes.mjs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+// A stand-in for the built dist/ so the tests do not depend on `npm run build`.
+const staticDir = mkdtempSync(path.join(tmpdir(), "iceberg-static-"));
+mkdirSync(path.join(staticDir, "assets"));
+writeFileSync(path.join(staticDir, "index.html"), "<!doctype html><title>Iceberg Sounder</title>");
+writeFileSync(path.join(staticDir, "assets", "app-abc123.js"), "export {};");
 
 let srv, base;
 before(async () => {
-  srv = createApp(fakeDeps().deps);
+  srv = createApp(fakeDeps().deps, { staticDir });
   await new Promise((r) => srv.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${srv.address().port}`;
 });
-after(() => srv.close());
+after(() => { srv.close(); rmSync(staticDir, { recursive: true, force: true }); });
 
 test("health reports configured services", async () => {
   const r = await fetch(base + "/api/health");
@@ -23,6 +32,13 @@ test("serves the page with a CSP that allows video embeds", async () => {
   assert.equal(r.status, 200);
   assert.match(r.headers.get("content-security-policy"), /frame-src https:\/\/www\.youtube-nocookie\.com/);
   assert.match(await r.text(), /Iceberg Sounder/);
+});
+
+test("hashed assets are cached as immutable, other files are not", async () => {
+  const a = await fetch(base + "/assets/app-abc123.js");
+  assert.equal(a.status, 200);
+  assert.equal(a.headers.get("cache-control"), "public, max-age=31536000, immutable");
+  assert.equal((await fetch(base + "/")).headers.get("cache-control"), null);
 });
 
 test("blocks path traversal and unknown files", async () => {

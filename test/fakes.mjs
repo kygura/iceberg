@@ -1,6 +1,6 @@
 // Stand-ins for Claude, Exa and Commons so the pipeline, server and UI can be
 // exercised without API keys. They mimic the real modules' interfaces.
-import { ZONES } from "../public/zones.js";
+import { ZONES } from "../web/zones.js";
 import { AppError } from "../lib/errors.mjs";
 
 export function fakeDeps({ exaFails = null, chartFailsAt = -1, slowMs = 0 } = {}) {
