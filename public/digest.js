@@ -16,6 +16,7 @@ export function digestOf(ice, { maxChars = 120000 } = {}) {
     const out = [`TOPIC: ${flat(ice.title || ice.topic)}`];
     if (ice.summary) out.push(`OVERVIEW: ${flat(ice.summary)}`);
     if (ice.notes) out.push(`RESEARCHER'S NOTES: ${flat(ice.notes)}`);
+    if (ice.reading) out.push(`STARTING IMAGE (the researcher began from an image; this is what it shows): ${flat(ice.reading)}`);
     ice.layers.forEach((l) => {
       const z = ZONES.find((x) => x.key === l.key);
       if (!z) return;

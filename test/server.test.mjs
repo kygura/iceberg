@@ -1,6 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { createApp } from "../server.mjs";
+import { createApp, parseImage } from "../server.mjs";
 import { fakeDeps } from "./fakes.mjs";
 
 let srv, base;
@@ -179,4 +179,33 @@ test("chat needs only an Anthropic key and checks the conversation's shape", asy
     assert.equal(r.status, 401);
     assert.deepEqual((await r.json()).error.missing, ["Anthropic"]);
   });
+});
+
+const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1]).toString("base64");
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]).toString("base64");
+
+test("parseImage takes the type from the file's bytes and rejects junk", () => {
+  assert.deepEqual(parseImage(null), { image: null });
+  assert.equal(parseImage({ media_type: "image/png", data: JPEG }).image.media_type, "image/jpeg", "client's type is ignored");
+  assert.equal(parseImage("data:image/png;base64," + PNG).image.media_type, "image/png");
+  assert.ok(parseImage({ data: Buffer.from("GIF89a-ish").toString("base64") }).image, "gif");
+  assert.ok(parseImage({ data: Buffer.from("<svg></svg>").toString("base64") }).error, "svg is refused");
+  assert.ok(parseImage({ data: "not base64!" }).error);
+  assert.ok(parseImage({ data: "A".repeat(4_000_004) }).error, "too large");
+});
+
+test("a dive can start from an image alone", async () => {
+  const r = await fetch(base + "/api/dive", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ topic: "", depth: "quick", image: { media_type: "image/jpeg", data: JPEG } }) });
+  assert.equal(r.status, 200);
+  const events = (await r.text()).trim().split("\n").map((l) => JSON.parse(l));
+  const plan = events.find((e) => e.type === "plan");
+  assert.equal(plan.title, "Pictured Lighthouse");
+  assert.ok(plan.reading);
+  assert.equal(events.at(-1).type, "done");
+});
+
+test("a bad image is refused before any work starts", async () => {
+  const r = await fetch(base + "/api/dive", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ topic: "x", image: { data: Buffer.from("hello").toString("base64") } }) });
+  assert.equal(r.status, 400);
+  assert.equal((await r.json()).error.code, "bad_image");
 });

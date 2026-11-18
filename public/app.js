@@ -139,8 +139,16 @@ function renderHero() {
   const done = ice.layers.filter((l) => l.status === "done").length;
   const media = ice.layers.reduce((n, l) => n + l.entries.filter((e) => mediaOf(ice, e).length).length, 0);
   const named = ice.title && ice.title.toLowerCase() !== String(ice.topic).toLowerCase();
+  const pic = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(ice.image || "") ? ice.image : null;
+  const seen = pic || ice.reading
+    ? h("figure", { class: "hero-image" },
+      pic ? h("img", { src: pic, alt: "The image this search started from" }) : null,
+      h("figcaption", {}, h("span", { class: "k", text: "WHAT CLAUDE SAW IN THE IMAGE" }),
+        ice.reading ? h("p", { text: ice.reading }) : h("p", { text: "Reading the image…" })))
+    : null;
   hero.replaceChildren(...[
     named ? h("h2", { text: ice.title }) : null,
+    seen,
     ice.summary ? h("p", { text: ice.summary })
       : h("div", { class: "skel-lines", "aria-label": "Planning the search" }, h("span", { class: "skel" }), h("span", { class: "skel" }), h("span", { class: "skel short" })),
     h("div", { class: "readouts" },
@@ -364,7 +372,7 @@ function show(ice) {
   if (state.busy) return;
   withAllLevels(ice);
   chatCtl?.abort(); chatCtl = null;
-  state.ice = ice; state.allSources = false; closeDrawer();
+  state.ice = ice; state.allSources = false; closeDrawer(); clearImage();
   if (ice) setNote(ice.topic || ice.title, ice.notesDoc || ice.notes || ""); else { const d = loadDraft(); setNote(d.topic, d.doc); }
   renderAll(); window.scrollTo({ top: 0 });
 }
@@ -444,6 +452,7 @@ const notesEd = createNotesEditor({
   placeholder: "Add notes to steer the research: an angle, a period, sources you trust, what to skip. Type / for commands.",
   actions: [
     { key: "research", t: "Research", d: "Start the search now", k: "", run: () => $("#diveBtn").click() },
+    { key: "image", t: "Attach an image", d: "Research what it shows", k: "", run: () => $("#attachInput").click() },
     { key: "quick", t: "Quick", d: "Fast, lighter reading", run: () => { setTier("quick"); } },
     { key: "thorough", t: "Thorough", d: "The default", run: () => { setTier("thorough"); } },
     { key: "deepest", t: "Deepest", d: "Slowest, most careful", run: () => { setTier("deep"); } },
@@ -472,6 +481,81 @@ const notesEd = createNotesEditor({
   const d = loadDraft(); setNote(d.topic, d.doc);
 })();
 
+/* ===== Pasted image ===== */
+/* An image pasted, dropped or chosen on the note is downscaled here to a JPEG
+   (1568 px on the long edge, the size Claude reads at full detail) and sent with
+   the dive. Claude reads it, names the subject and plans the searches from it.
+   Only a small thumbnail is kept with the saved iceberg. */
+const IMAGE_EDGE = 1568, THUMB_EDGE = 240;
+let attached = null;
+async function loadBitmap(file) {
+  if (window.createImageBitmap) { try { return await createImageBitmap(file); } catch {} }
+  const url = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+  const im = new Image(); im.src = url; await im.decode(); return im;
+}
+function toJpeg(bmp, edge, quality) {
+  const w = bmp.width, hgt = bmp.height, k = Math.min(1, edge / Math.max(w, hgt));
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(hgt * k));
+  const g = c.getContext("2d");
+  g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); // transparent areas become white, not black
+  g.drawImage(bmp, 0, 0, c.width, c.height);
+  return c.toDataURL("image/jpeg", quality);
+}
+async function attachImage(file) {
+  if (state.busy || !file) return;
+  if (!/^image\/(png|jpe?g|gif|webp|bmp|avif)$/.test(file.type)) { setStatus("Use a PNG, JPEG, GIF or WebP image.", "err"); return; }
+  if (file.size > 30 * 1024 * 1024) { setStatus("That image is too large. Use one under 30 MB.", "err"); return; }
+  try {
+    const bmp = await loadBitmap(file);
+    const full = toJpeg(bmp, IMAGE_EDGE, 0.86);
+    attached = { media_type: "image/jpeg", data: full.slice(full.indexOf(",") + 1), thumb: toJpeg(bmp, THUMB_EDGE, 0.72), w: bmp.width, h: bmp.height };
+    bmp.close?.();
+  } catch { setStatus("Couldn't read that image. Try a PNG or JPEG.", "err"); return; }
+  renderImage();
+}
+function clearImage() { if (!attached) return; attached = null; renderImage(); }
+function renderImage() {
+  $("#noteImage").hidden = !attached;
+  $("#topic").dataset.placeholder = attached ? "Topic (optional)" : "Untitled topic";
+  if (!attached) { $("#noteImageImg").removeAttribute("src"); return; }
+  $("#noteImageImg").src = attached.thumb;
+  $("#noteImageMeta").textContent = `${attached.w} × ${attached.h} px. Claude reads it and researches what it shows. The title is optional; notes steer the angle.`;
+}
+/* The clipboard's image, unless it also carries text: Word and similar apps put a
+   picture of the copied text on the clipboard, and the text is what's wanted. */
+function imageFrom(dt, { textWins = true } = {}) {
+  if (!dt) return null;
+  if (textWins && (dt.getData?.("text/plain") || "").trim()) return null;
+  const item = [...(dt.items || [])].find((i) => i.kind === "file" && i.type.startsWith("image/"));
+  return item?.getAsFile() || [...(dt.files || [])].find((f) => f.type.startsWith("image/")) || null;
+}
+(function setupImage() {
+  const note = $("#note"), input = $("#attachInput");
+  $("#attachBtn").addEventListener("click", () => input.click());
+  input.addEventListener("change", () => { attachImage(input.files?.[0]); input.value = ""; });
+  $("#noteImageRemove").addEventListener("click", () => { clearImage(); notesEd.focusEnd(); });
+  // Capture phase, so the title's and the editor's own paste handlers never see it.
+  document.addEventListener("paste", (ev) => {
+    if (ev.target?.closest?.("#chatForm, #keysForm")) return;
+    const file = imageFrom(ev.clipboardData);
+    if (!file) return;
+    ev.preventDefault(); ev.stopPropagation();
+    attachImage(file);
+  }, true);
+  const hasFiles = (ev) => [...(ev.dataTransfer?.types || [])].includes("Files");
+  note.addEventListener("dragover", (ev) => { if (!hasFiles(ev) || state.busy) return; ev.preventDefault(); note.classList.add("dropping"); });
+  note.addEventListener("dragleave", (ev) => { if (!note.contains(ev.relatedTarget)) note.classList.remove("dropping"); });
+  note.addEventListener("drop", (ev) => {
+    note.classList.remove("dropping");
+    const file = imageFrom(ev.dataTransfer, { textWins: false });
+    if (!file) return;
+    ev.preventDefault(); ev.stopPropagation();
+    attachImage(file);
+  }, true);
+  renderImage();
+})();
+
 /* ===== Status ===== */
 const prog = { done: 0, total: 1 };
 function setStatus(text, kind) {
@@ -485,6 +569,7 @@ function setBusy(b) {
   $("#effort").classList.toggle("off", b); if (b) closeEffort();
   $("#diveBtn").disabled = b || !canDive();
   $("#diveBtn").hidden = b;
+  $("#attachBtn").disabled = b;
   $("#stopBtn").hidden = !b;
   $("#bar").hidden = !b;
   $("#note").classList.toggle("busy", b);
@@ -497,20 +582,26 @@ function setBusy(b) {
 async function build(topic, notes = "", notesDoc = null) {
   topic = String(topic || "").replace(/\s+/g, " ").trim().slice(0, 160);
   notes = String(notes || "").trim().slice(0, 2000);
-  if (!topic) { setStatus("Write a topic as the title first."); $("#topic").focus(); return; }
+  const image = attached;
+  if (!topic && !image) { setStatus("Write a topic as the title, or paste an image."); $("#topic").focus(); return; }
   if (state.busy || !canDive()) return;
   const ctl = buildCtl = new AbortController();
-  const ice = { id: "ice-" + Date.now().toString(36), topic, notes, notesDoc: notes ? notesDoc : null, title: topic, summary: "", createdAt: Date.now(), sources: [],
+  const ice = { id: "ice-" + Date.now().toString(36), topic, notes, notesDoc: notes ? notesDoc : null, title: topic || "Image search", summary: "", createdAt: Date.now(), sources: [],
+    ...(image ? { image: image.thumb, reading: "" } : {}),
     layers: ZONES.map((z) => ({ key: z.key, status: "pending", entries: [], theme: "" })) };
   state.ice = ice; closeDrawer(); setBusy(true); renderAll();
   prog.total = 1 + LEVELS * 3; prog.done = 0;
-  setStatus(`Planning searches for “${topic}”…`, "busy");
+  setStatus(image ? "Reading the image and planning searches…" : `Planning searches for “${topic}”…`, "busy");
   let finished = false;
   try {
-    for await (const ev of await postStream("/api/dive", { topic, notes, depth: $("#tier").value }, ctl.signal)) {
+    const body = { topic, notes, depth: $("#tier").value, ...(image ? { image: { media_type: image.media_type, data: image.data } } : {}) };
+    for await (const ev of await postStream("/api/dive", body, ctl.signal)) {
       if (ev.type === "status") setStatus(ev.text, "busy");
       else if (ev.type === "plan") {
-        ice.title = ev.title || topic; ice.summary = ev.summary || "";
+        ice.title = ev.title || topic || ice.title; ice.summary = ev.summary || "";
+        if (image) ice.reading = ev.reading || "";
+        // With no topic typed, the one Claude named from the image becomes the title.
+        if (!ice.topic) { ice.topic = ice.title; if (!titleText()) { $("#topic").textContent = ice.title; draftNow(); } }
         ice.layers.forEach((l, i) => { l.theme = ev.themes?.[i] || ""; });
         prog.done = 1; setProgress(); renderHero(); renderOcean();
       } else if (ev.type === "source") {

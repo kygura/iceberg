@@ -87,6 +87,29 @@ const USER_KEY_MESSAGES = {
   exa_auth: "Exa rejected the API key you entered. Check it under Keys.",
   exa_credits: "The Exa account for the key you entered is out of credits.",
 };
+/* A pasted image for /api/dive. The browser downscales it to a JPEG first; the
+   type is taken from the file's own header bytes, not from what the client says. */
+const IMAGE_MAX_B64 = 4_000_000; // about 3 MB decoded; under Vercel's 4.5 MB body limit
+const MAGIC = [
+  ["image/jpeg", (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff],
+  ["image/png", (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47],
+  ["image/gif", (b) => b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46],
+  ["image/webp", (b) => b.subarray(0, 4).toString("latin1") === "RIFF" && b.subarray(8, 12).toString("latin1") === "WEBP"],
+];
+/** Returns { image } (possibly null) or { error } for a bad one. */
+export function parseImage(v) {
+  if (v == null || v === "") return { image: null };
+  let data = typeof v === "object" ? v.data : v;
+  if (typeof data !== "string") return { error: "The image wasn't sent in a readable form." };
+  data = data.replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
+  if (!data || data.length > IMAGE_MAX_B64) return { error: "That image is too large. Use one under 3 MB." };
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(data)) return { error: "The image wasn't sent in a readable form." };
+  const head = Buffer.from(data.slice(0, 24), "base64");
+  const type = MAGIC.find(([, ok]) => ok(head))?.[0];
+  if (!type) return { error: "Use a JPEG, PNG, GIF or WebP image." };
+  return { image: { media_type: type, data } };
+}
+
 function keyHeader(req, name) {
   const v = req.headers[name];
   return typeof v === "string" ? v.trim() : "";
@@ -146,14 +169,16 @@ export function createHandler(deps, {
       const wrapEmit = (emit) => (ev) => emit(ev.type === "error" ? { ...ev, error: fixMsg(ev.error) } : ev);
 
       if (req.method === "POST" && url.pathname === "/api/dive") {
-        const body = await readJson(req);
+        const body = await readJson(req, 4.5 * 1024 * 1024);
         const topic = clean(body.topic, 160);
         const depth = DEPTHS.has(body.depth) ? body.depth : "thorough";
         const notes = cleanNotes(body.notes, 2000);
-        if (!topic) return send(res, 400, { error: { code: "bad_request", message: "Name a topic to dive into." } });
+        const { image, error: imageError } = parseImage(body.image);
+        if (imageError) return send(res, 400, { error: { code: "bad_image", message: imageError } });
+        if (!topic && !image) return send(res, 400, { error: { code: "bad_request", message: "Name a topic or paste an image to dive into." } });
         if (running >= maxDives) return send(res, 429, { error: { code: "busy", message: "Too many dives running at once. Try again in a minute." } });
         running++;
-        return ndjson(req, res, (emit, signal) => runDive({ topic, notes, depth, emit: wrapEmit(emit), signal, deps: ctx.deps })).finally(() => { running--; });
+        return ndjson(req, res, (emit, signal) => runDive({ topic, notes, image, depth, emit: wrapEmit(emit), signal, deps: ctx.deps })).finally(() => { running--; });
       }
 
       if (req.method === "POST" && url.pathname === "/api/media") {
