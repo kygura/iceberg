@@ -106,8 +106,38 @@ function saveHistory(ice) {
     list.unshift(ice);
     localStorage.setItem(HKEY, JSON.stringify(list.slice(0, 12)));
   } catch {}
+  pruneImages();
   renderRecent();
 }
+/* Full-size pasted images, kept in IndexedDB by iceberg id: they're too large
+   for localStorage, where each saved iceberg keeps only a 240 px thumbnail. */
+const fullImages = (() => {
+  const mem = new Map();
+  let dbp = null;
+  const db = () => (dbp ||= new Promise((res, rej) => {
+    const r = indexedDB.open("iceberg-sounder", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("images");
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  }));
+  const tx = async (mode, fn) => {
+    const d = await db();
+    return new Promise((res, rej) => { const t = d.transaction("images", mode); const out = fn(t.objectStore("images")); t.oncomplete = () => res(out?.result); t.onerror = () => rej(t.error); });
+  };
+  return {
+    put(id, url) { mem.set(id, url); tx("readwrite", (st) => st.put(url, id)).catch(() => {}); },
+    async get(id) { if (mem.has(id)) return mem.get(id); try { const u = await tx("readonly", (st) => st.get(id)); if (u) mem.set(id, u); return u || null; } catch { return null; } },
+    /* Drops images whose iceberg is no longer saved. */
+    async prune(keep) {
+      try {
+        const keys = await tx("readonly", (st) => st.getAllKeys());
+        const gone = (keys || []).filter((k) => !keep.has(k));
+        gone.forEach((k) => mem.delete(k));
+        if (gone.length) await tx("readwrite", (st) => gone.forEach((k) => st.delete(k)));
+      } catch {}
+    },
+  };
+})();
+const pruneImages = () => fullImages.prune(new Set([...loadHistory().map((x) => x.id), state.ice?.id].filter(Boolean)));
 const state = { ice: null, open: null, busy: false };
 const server = { ok: false, claude: false, exa: false, commons: false, owner: false };
 let buildCtl = null, deepCtl = null;
@@ -142,7 +172,9 @@ function renderHero() {
   const pic = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(ice.image || "") ? ice.image : null;
   const seen = pic || ice.reading
     ? h("figure", { class: "hero-image" },
-      pic ? h("img", { src: pic, alt: "The image this search started from" }) : null,
+      pic ? h("button", { class: "thumb-open", type: "button", "aria-label": "View the image this search started from, full size",
+        onclick: async () => viewImage((await fullImages.get(ice.id)) || pic, ice.imageSize ? `${ice.imageSize[0]} × ${ice.imageSize[1]} px original, shown at the size sent to Claude` : "") },
+        h("img", { src: pic, alt: "" })) : null,
       h("figcaption", {}, h("span", { class: "k", text: "WHAT CLAUDE SAW IN THE IMAGE" }),
         ice.reading ? h("p", { text: ice.reading }) : h("p", { text: "Reading the image…" })))
     : null;
@@ -324,6 +356,7 @@ const fmtDate = (t) => new Date(t).toLocaleDateString(undefined, { month: "short
 const countEntries = (ice) => ice.layers.reduce((n, l) => n + l.entries.length, 0);
 function deleteSaved(id) {
   try { localStorage.setItem(HKEY, JSON.stringify(loadHistory().filter((x) => x.id !== id))); } catch {}
+  pruneImages();
   if (state.ice?.id === id) show(null); else renderRecent();
 }
 function savedRow(ice, { removable }) {
@@ -509,7 +542,7 @@ async function attachImage(file) {
   try {
     const bmp = await loadBitmap(file);
     const full = toJpeg(bmp, IMAGE_EDGE, 0.86);
-    attached = { media_type: "image/jpeg", data: full.slice(full.indexOf(",") + 1), thumb: toJpeg(bmp, THUMB_EDGE, 0.72), w: bmp.width, h: bmp.height };
+    attached = { media_type: "image/jpeg", data: full.slice(full.indexOf(",") + 1), full, thumb: toJpeg(bmp, THUMB_EDGE, 0.72), w: bmp.width, h: bmp.height };
     bmp.close?.();
   } catch { setStatus("Couldn't read that image. Try a PNG or JPEG.", "err"); return; }
   renderImage();
@@ -520,6 +553,7 @@ function renderImage() {
   $("#topic").dataset.placeholder = attached ? "Topic (optional)" : "Untitled topic";
   if (!attached) { $("#noteImageImg").removeAttribute("src"); return; }
   $("#noteImageImg").src = attached.thumb;
+  $("#noteImageImg").alt = "The attached image";
   $("#noteImageMeta").textContent = `${attached.w} × ${attached.h} px. Claude reads it and researches what it shows. The title is optional; notes steer the angle.`;
 }
 /* The clipboard's image, unless it also carries text: Word and similar apps put a
@@ -535,6 +569,7 @@ function imageFrom(dt, { textWins = true } = {}) {
   $("#attachBtn").addEventListener("click", () => input.click());
   input.addEventListener("change", () => { attachImage(input.files?.[0]); input.value = ""; });
   $("#noteImageRemove").addEventListener("click", () => { clearImage(); notesEd.focusEnd(); });
+  $("#noteImageOpen").addEventListener("click", () => { if (attached) viewImage(attached.full, `${attached.w} × ${attached.h} px original, shown at the size sent to Claude`); });
   // Capture phase, so the title's and the editor's own paste handlers never see it.
   document.addEventListener("paste", (ev) => {
     if (ev.target?.closest?.("#chatForm, #keysForm")) return;
@@ -587,8 +622,9 @@ async function build(topic, notes = "", notesDoc = null) {
   if (state.busy || !canDive()) return;
   const ctl = buildCtl = new AbortController();
   const ice = { id: "ice-" + Date.now().toString(36), topic, notes, notesDoc: notes ? notesDoc : null, title: topic || "Image search", summary: "", createdAt: Date.now(), sources: [],
-    ...(image ? { image: image.thumb, reading: "" } : {}),
+    ...(image ? { image: image.thumb, imageSize: [image.w, image.h], reading: "" } : {}),
     layers: ZONES.map((z) => ({ key: z.key, status: "pending", entries: [], theme: "" })) };
+  if (image) fullImages.put(ice.id, image.full);
   state.ice = ice; closeDrawer(); setBusy(true); renderAll();
   prog.total = 1 + LEVELS * 3; prog.done = 0;
   setStatus(image ? "Reading the image and planning searches…" : `Planning searches for “${topic}”…`, "busy");
@@ -977,7 +1013,17 @@ function openLightbox(s) {
   $("#lbImg").src = s.image; $("#lbImg").alt = s.title;
   $("#lbTitle").textContent = `[${s.id}] ${s.title}`;
   $("#lbMeta").textContent = [hostOf(s.url), s.author, s.license].filter(Boolean).join(" · ");
-  $("#lbLink").href = s.url;
+  $("#lbLink").href = s.url; $("#lbLink").hidden = false;
+  $("#lightbox").hidden = false; $("#lbClose").focus();
+}
+/* The pasted image in the same viewer. It has no source page, so no link. */
+function viewImage(url, meta = "") {
+  if (!/^data:image\/jpeg;base64,/.test(url || "")) return;
+  lbReturn = document.activeElement;
+  $("#lbImg").src = url; $("#lbImg").alt = "The image this search started from";
+  $("#lbTitle").textContent = "The image this search started from";
+  $("#lbMeta").textContent = meta;
+  $("#lbLink").hidden = true; $("#lbLink").removeAttribute("href");
   $("#lightbox").hidden = false; $("#lbClose").focus();
 }
 function closeLightbox() {

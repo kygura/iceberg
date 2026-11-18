@@ -26,7 +26,7 @@ Paste an image anywhere on the note (or drop it on the note, or use **Image** or
 
 The browser downscales the image to a JPEG, 1568 px on the long edge, and sends it with the dive. It goes to Claude only in the planning call, which now also returns `image_reading`: two to four sentences on what the image shows, how sure the identification is, and what angle the research takes. That reading is added to the notes for every later lead and chart prompt, so all seven levels stay tied to the image, and it appears above the chart as **What Claude saw in the image**. Claude is told not to identify private individuals from their faces.
 
-The server reads the image type from the file's own header bytes (JPEG, PNG, GIF or WebP) and refuses anything over about 3 MB. Only a 240 px thumbnail is saved with the iceberg; the chat digest includes the reading. An image search costs the same number of calls as a text one, plus the image's input tokens on the planning call (about 1,600 for a full-size image).
+The server reads the image type from the file's own header bytes (JPEG, PNG, GIF or WebP) and refuses anything over about 3 MB. The saved iceberg keeps a 240 px thumbnail in localStorage and the 1568 px copy in IndexedDB, which is dropped when the iceberg is deleted or falls off the saved list. Clicking either thumbnail (on the note or above the chart) opens that copy in the image viewer. The chat digest includes the reading. An image search costs the same number of calls as a text one, plus the image's input tokens on the planning call (about 1,600 for a full-size image).
 
 Past searches and a pre-built example (the Voynich manuscript) are in the **Saved searches** menu, so you can look around before adding keys.
 
