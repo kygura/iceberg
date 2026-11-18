@@ -4,7 +4,7 @@ import { ZONES } from "../public/zones.js";
 import { AppError } from "../lib/errors.mjs";
 
 export function fakeDeps({ exaFails = null, chartFailsAt = -1, slowMs = 0 } = {}) {
-  const calls = { structured: 0, search: [], contents: 0, stream: 0, commons: [], prompts: [] };
+  const calls = { structured: 0, search: [], contents: 0, stream: 0, commons: [], prompts: [], images: [] };
   const wait = (signal) => new Promise((res, rej) => {
     const t = setTimeout(res, slowMs);
     signal?.addEventListener("abort", () => { clearTimeout(t); rej(Object.assign(new Error("aborted"), { name: "AbortError" })); }, { once: true });
@@ -12,13 +12,15 @@ export function fakeDeps({ exaFails = null, chartFailsAt = -1, slowMs = 0 } = {}
 
   const claude = {
     configured: true,
-    async structured(prompt, schema, { signal } = {}) {
+    async structured(prompt, schema, { signal, image } = {}) {
       calls.structured++;
       calls.prompts.push(prompt);
+      calls.images.push(image || null);
       await wait(signal);
       if (prompt.includes('planning an "iceberg"')) {
         return {
-          title: "Test Topic", summary: "A topic used for tests.",
+          title: image ? "Pictured Lighthouse" : "Test Topic", summary: "A topic used for tests.",
+          image_reading: image ? "A stone lighthouse on a rocky coast, likely the one named on its plaque." : "",
           layers: ZONES.map((z) => ({ key: z.key, theme: `${z.name} theme`, queries: [`${z.key} q1`, `${z.key} q2`, `${z.key} q3`] })),
           records: "official records for test topic",
           media: { video: "videos about test topic", images: "photos of test topic", papers: "papers on test topic" },

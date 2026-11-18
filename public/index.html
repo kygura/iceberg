@@ -47,6 +47,14 @@
       <div class="note-meta" id="noteMeta"></div>
       <h1 class="note-title" id="topic" contenteditable="plaintext-only" role="textbox" aria-label="Research topic" spellcheck="true" data-placeholder="Untitled topic"></h1>
       <div class="note-editor" id="notes"></div>
+      <figure class="note-image" id="noteImage" hidden>
+        <button class="thumb-open" id="noteImageOpen" type="button" aria-label="View the attached image full size"><img id="noteImageImg" alt=""></button>
+        <figcaption>
+          <b>Image attached</b>
+          <span id="noteImageMeta">Claude reads it and researches what it shows. The title is optional.</span>
+        </figcaption>
+        <button class="xbtn" id="noteImageRemove" type="button" aria-label="Remove the image">×</button>
+      </figure>
       <div class="bubble" id="bubble" role="toolbar" aria-label="Format">
         <button type="button" data-cmd="bold" aria-label="Bold"><b>B</b></button>
         <button type="button" data-cmd="italic" aria-label="Italic"><i>I</i></button>
@@ -66,6 +74,8 @@
           <button class="effort-btn" id="effortBtn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="effortMenu" aria-label="Effort"><span class="lbl">Thorough</span></button>
           <div class="effort-menu" id="effortMenu" role="listbox" aria-label="Effort" hidden></div>
         </div>
+        <button class="attach-btn" id="attachBtn" type="button" title="Paste, drop or choose an image to research">Image</button>
+        <input type="file" id="attachInput" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
         <span class="kbd" id="kbdHint" aria-hidden="true"></span>
         <button class="btn-dive" id="diveBtn" type="button">Research</button>
         <button class="btn-stop" id="stopBtn" type="button" hidden>Stop</button>
@@ -101,7 +111,7 @@
     <ol class="sources" id="sources"></ol>
     <button class="btn more" id="srcMore" type="button" hidden></button>
     <div class="how">
-      <div><b>How it works.</b> Claude writes five web searches for each level, at least two aimed at official records, plus one search for the topic's primary documents, and Exa runs them. Claude reads each level's results and names the leads worth chasing (people, documents, cases they mention), and those get a second round of searches. Claude then sorts the results into levels using only what those pages say. Each entry cites the closest source first: official records, then archives, scholarship, reference works, press, other sites and video, in that order. <b>Dig deeper</b> has Claude read an entry's cited pages in full.</div>
+      <div><b>How it works.</b> Start from a topic, or paste an image: Claude reads the image, names what it shows and plans the research from that. Claude writes five web searches for each level, at least two aimed at official records, plus one search for the topic's primary documents, and Exa runs them. Claude reads each level's results and names the leads worth chasing (people, documents, cases they mention), and those get a second round of searches. Claude then sorts the results into levels using only what those pages say. Each entry cites the closest source first: official records, then archives, scholarship, reference works, press, other sites and video, in that order. <b>Dig deeper</b> has Claude read an entry's cited pages in full.</div>
       <div>Images and videos come from the cited pages, Wikimedia Commons (credited with author and license), YouTube and Vimeo. Icebergs you make are saved in this browser only.</div>
     </div>
   </div>

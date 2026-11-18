@@ -164,3 +164,28 @@ test("quick dives skip the lead round", async () => {
   await collect((emit) => runDive({ topic: "t", depth: "quick", emit, signal: new AbortController().signal, deps }));
   assert.ok(!calls.prompts.some((p) => p.startsWith("You are researching one layer")));
 });
+
+test("an image with no topic: Claude reads it, names the topic, and the reading steers every level", async () => {
+  const { deps, calls } = fakeDeps();
+  const image = { media_type: "image/jpeg", data: "/9j/AAAA" };
+  const events = await collect((emit) => runDive({ topic: "", image, depth: "thorough", emit, signal: new AbortController().signal, deps }));
+  const plan = events.find((e) => e.type === "plan");
+  assert.equal(plan.title, "Pictured Lighthouse");
+  assert.match(plan.reading, /stone lighthouse/);
+  assert.deepEqual(calls.images[0], image, "the plan call carries the image");
+  assert.ok(calls.images.slice(1).every((x) => x === null), "only the plan call sends the image");
+  assert.match(calls.prompts[0], /attached an image/);
+  assert.match(calls.prompts[0], /gave no topic/);
+  const later = calls.prompts.slice(1);
+  assert.ok(later.length >= LEVELS * 2, "lead and chart prompts ran");
+  assert.ok(later.every((p) => p.includes("stone lighthouse")), "every later prompt carries the image reading");
+  assert.equal(events.at(-1).type, "done");
+});
+
+test("a dive without an image sends no image and emits no reading", async () => {
+  const { deps, calls } = fakeDeps();
+  const events = await collect((emit) => runDive({ topic: "t", depth: "quick", emit, signal: new AbortController().signal, deps }));
+  assert.ok(calls.images.every((x) => x === null));
+  assert.equal(events.find((e) => e.type === "plan").reading, undefined);
+  assert.doesNotMatch(calls.prompts[0], /attached an image/);
+});

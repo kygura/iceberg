@@ -92,3 +92,13 @@ test("stream() with a conversation sends a cached system prompt and the turns", 
   assert.equal(body.max_tokens, 16000);
   assert.ok(text.length);
 });
+
+test("structured() with an image sends it as a base64 block ahead of the prompt", async () => {
+  seen = [];
+  reply = (b) => message(b.model, JSON.stringify({ entries: [] }));
+  const image = { media_type: "image/png", data: "iVBORw0KGgo=" };
+  await createClaude({ client: client() }).structured("Plan this.", ChartSchema, { image });
+  const content = seen[0].body.messages[0].content;
+  assert.deepEqual(content[0], { type: "image", source: { type: "base64", ...image } });
+  assert.deepEqual(content[1], { type: "text", text: "Plan this." });
+});

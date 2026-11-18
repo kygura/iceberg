@@ -20,6 +20,14 @@ npm start              # http://localhost:3000
 
 The page opens on a blank note. Write the topic as the title and, if you like, notes underneath to steer the research (an angle, a period, sources to favor or skip). The notes are a [Tiptap](https://tiptap.dev) editor: Markdown shortcuts (`## `, `- `, `1. `, `> `, `**bold**`) work as you type, selecting text shows a formatting bar, and `/` opens a menu of blocks and actions (research now, set the effort, open the example, start a new search). Claude receives the notes as Markdown. Press Ctrl+Enter (⌘+Enter on a Mac) or **Research** to start.
 
+## Starting from an image
+
+Paste an image anywhere on the note (or drop it on the note, or use **Image** or `/image`), and Claude researches what it shows. The title is optional: leave it blank and Claude names the topic from the image; type one and the image narrows it. Notes still steer the angle.
+
+The browser downscales the image to a JPEG, 1568 px on the long edge, and sends it with the dive. It goes to Claude only in the planning call, which now also returns `image_reading`: two to four sentences on what the image shows, how sure the identification is, and what angle the research takes. That reading is added to the notes for every later lead and chart prompt, so all seven levels stay tied to the image, and it appears above the chart as **What Claude saw in the image**. Claude is told not to identify private individuals from their faces.
+
+The server reads the image type from the file's own header bytes (JPEG, PNG, GIF or WebP) and refuses anything over about 3 MB. The saved iceberg keeps a 240 px thumbnail in localStorage and the 1568 px copy in IndexedDB, which is dropped when the iceberg is deleted or falls off the saved list. Clicking either thumbnail (on the note or above the chart) opens that copy in the image viewer. The chat digest includes the reading. An image search costs the same number of calls as a text one, plus the image's input tokens on the planning call (about 1,600 for a full-size image).
+
 Past searches and a pre-built example (the Voynich manuscript) are in the **Saved searches** menu, so you can look around before adding keys.
 
 ## The levels
@@ -80,7 +88,7 @@ On Vercel the server's keys are never used unless `ALLOW_PUBLIC=1`, so a public 
 ## Layout
 
 ```
-server.mjs          HTTP server: static files, /api/dive, /api/deep and /api/chat (NDJSON streams), /api/health
+server.mjs          HTTP server: static files, /api/dive (topic and/or image), /api/deep and /api/chat (NDJSON streams), /api/health
 lib/pipeline.mjs    dive and deep-dive orchestration, prompts
 public/editor.js    the notes editor (Tiptap), Markdown export
 public/digest.js    the compact text of an iceberg that the chat sends to Claude
