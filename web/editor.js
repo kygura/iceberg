@@ -1,6 +1,10 @@
 /* The notes under the topic: a Tiptap editor with Markdown shortcuts,
    a bubble menu on selection and a / command menu. */
-import { Editor, Extension, StarterKit, Placeholder, CharacterCount, BubbleMenu, Suggestion } from "/vendor/tiptap.js";
+import { Editor, Extension } from "@tiptap/core";
+import { StarterKit } from "@tiptap/starter-kit";
+import { Placeholder, CharacterCount } from "@tiptap/extensions";
+import { BubbleMenu } from "@tiptap/extension-bubble-menu";
+import { Suggestion } from "@tiptap/suggestion";
 
 export const NOTES_LIMIT = 2000;
 

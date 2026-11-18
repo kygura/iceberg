@@ -1,6 +1,7 @@
 import http from "node:http";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClaude, modelId } from "./lib/claude.mjs";
@@ -10,8 +11,8 @@ import { runDive, runDeep, runChat, findEntryMedia } from "./lib/pipeline.mjs";
 import { publicError } from "./lib/errors.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const PUBLIC = path.join(here, "public");
-const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".ico": "image/x-icon" };
+const DIST = path.join(here, "dist");
+const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".ico": "image/x-icon", ".png": "image/png", ".woff2": "font/woff2", ".json": "application/json; charset=utf-8" };
 
 const CSP = [
   "default-src 'self'",
@@ -116,10 +117,11 @@ function keyHeader(req, name) {
 }
 
 export function createHandler(deps, {
-  maxDives = Number(process.env.MAX_DIVES) || 2, env = process.env,
+  maxDives = Number(process.env.MAX_DIVES) || 2, env = process.env, staticDir = DIST,
   makeClaude = (apiKey) => createClaude({ apiKey }), makeExa = (apiKey) => createExa({ apiKey }),
 } = {}) {
   let running = 0;
+  const root = path.resolve(staticDir);
   const open = serverKeysOpen(env);
   const secret = String(env.OWNER_SECRET || "");
   const isOwner = (req) => secret.length >= 16 && sameText(cookieOf(req, OWNER_COOKIE), ownerToken(secret));
@@ -226,13 +228,13 @@ export function createHandler(deps, {
 
       if (req.method === "GET" || req.method === "HEAD") {
         const rel = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname).replace(/^\/+/, "");
-        const file = path.resolve(PUBLIC, rel);
-        if (!file.startsWith(PUBLIC + path.sep)) return send(res, 404, "Not found", "text/plain");
+        const file = path.resolve(root, rel);
+        if (!file.startsWith(root + path.sep)) return send(res, 404, "Not found", "text/plain");
         const type = TYPES[path.extname(file)];
         if (!type) return send(res, 404, "Not found", "text/plain");
         const data = await readFile(file).catch(() => null);
         if (!data) return send(res, 404, "Not found", "text/plain");
-        return send(res, 200, data, type);
+        return send(res, 200, data, type, url.pathname.startsWith("/assets/") ? { "cache-control": "public, max-age=31536000, immutable" } : undefined);
       }
       send(res, 405, { error: { code: "method", message: "Method not allowed" } });
     } catch (e) {
@@ -253,6 +255,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const deps = { claude: createClaude(), exa: createExa(), commons: createCommons() };
   const port = Number(process.env.PORT) || 3000;
   const host = process.env.HOST || "127.0.0.1";
+  if (!existsSync(path.join(DIST, "index.html"))) console.warn("  · dist/index.html not found: run `npm run build` first.");
   createApp(deps).listen(port, host, () => {
     console.log(`Iceberg Sounder on http://${host === "0.0.0.0" ? "localhost" : host}:${port}`);
     if (!deps.claude.configured) console.warn("  · ANTHROPIC_API_KEY not set: visitors need to enter their own key under Keys.");

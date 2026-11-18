@@ -15,8 +15,19 @@ Needs Node 20 or later.
 ```bash
 npm install
 cp .env.example .env   # then add ANTHROPIC_API_KEY and EXA_API_KEY
+npm run dev            # development: http://localhost:5173
+```
+
+`npm run dev` starts the Vite dev server with hot reload. It serves the `/api/*` routes from the same handler as `server.mjs`.
+
+For a production-like run, build the page and serve it from the Node server:
+
+```bash
+npm run build          # writes the site to dist/
 npm start              # http://localhost:3000
 ```
+
+`npm start` serves `dist/` and the API. It prints a warning if `dist/index.html` is missing.
 
 The page opens on a blank note. Write the topic as the title and, if you like, notes underneath to steer the research (an angle, a period, sources to favor or skip). The notes are a [Tiptap](https://tiptap.dev) editor: Markdown shortcuts (`## `, `- `, `1. `, `> `, `**bold**`) work as you type, selecting text shows a formatting bar, and `/` opens a menu of blocks and actions (research now, set the effort, open the example, start a new search). Claude receives the notes as Markdown. Press Ctrl+Enter (⌘+Enter on a Mac) or **Research** to start.
 
@@ -51,12 +62,12 @@ Entries get smaller and quieter level by level. Searches saved before level 6 ex
 3. Claude reads each level's first-round results and lists 4 to 6 leads they point toward (a named person, a court filing, a patent, an incident) that the results don't cover yet. Those get a second round of searches. Quick dives skip this round.
 4. Claude charts each level from both rounds plus the topic's official records, using structured output: 6 to 8 entries at the top, up to 12 further down. Entries that cite nothing are dropped.
 
-Sources are ranked by how close they are to the original (`public/provenance.js`): official records (government, courts, legislation, patents), then archives, libraries and museums, scholarship, reference works, press, other sites, and video last. Claude is told to cite the closest source, and the server sorts each entry's citations by that rank. Media follows the same order: document scans and archival photos before decorative images, official or archival footage before other video.
+Sources are ranked by how close they are to the original (`web/provenance.js`): official records (government, courts, legislation, patents), then archives, libraries and museums, scholarship, reference works, press, other sites, and video last. Claude is told to cite the closest source, and the server sorts each entry's citations by that rank. Media follows the same order: document scans and archival photos before decorative images, official or archival footage before other video.
 5. **Dig deeper** on an entry fetches the cited pages in full and streams a longer write-up with citations and follow-up topics.
 
 ## Asking about the findings
 
-Once a level is charted, **Ask about the findings** opens a sidebar chat. Each question sends Claude a digest of the iceberg (`public/digest.js`): every level and entry with its confidence and cited source numbers, any Dig deeper write-ups, and the source list with titles, sites, provenance labels and short excerpts. The Voynich example's digest is about 13,000 characters (29 entries, 19 sources); a full dive with 70 entries and 150 sources comes to roughly 90,000. Above 120,000, excerpts and write-ups are shortened before any entry is cut. The digest goes in a cached system prompt, so follow-up questions in the same conversation reuse it.
+Once a level is charted, **Ask about the findings** opens a sidebar chat. Each question sends Claude a digest of the iceberg (`web/digest.js`): every level and entry with its confidence and cited source numbers, any Dig deeper write-ups, and the source list with titles, sites, provenance labels and short excerpts. The Voynich example's digest is about 13,000 characters (29 entries, 19 sources); a full dive with 70 entries and 150 sources comes to roughly 90,000. Above 120,000, excerpts and write-ups are shortened before any entry is cut. The digest goes in a cached system prompt, so follow-up questions in the same conversation reuse it.
 
 Claude answers from the digest, cites sources as [n], and links entries it mentions; clicking one opens that entry. It says when the findings don't cover a question and points to Dig deeper or a new iceberg. The chat needs only an Anthropic key, and each conversation is saved with its iceberg.
 
@@ -74,7 +85,7 @@ Running locally, the server's own keys from `.env` are used when a visitor bring
 
 ## Deploy on Vercel
 
-The repo deploys as-is: `public/` is served statically and each file in `api/` is a function using the same handler as `server.mjs`. No environment variables are required: visitors search with their own keys. Optional ones:
+Vercel runs `npm run build`, which uses Vite to build `web/` into `dist/`, and serves `dist/` statically. Files under `dist/assets/` have content hashes in their names and are cached as immutable. Each file in `api/` is a function using the same handler as `server.mjs`, and these are unchanged. No environment variables are required: visitors search with their own keys. Optional ones:
 
 | Variable | |
 |---|---|
@@ -88,15 +99,14 @@ On Vercel the server's keys are never used unless `ALLOW_PUBLIC=1`, so a public 
 ## Layout
 
 ```
-server.mjs          HTTP server: static files, /api/dive (topic and/or image), /api/deep and /api/chat (NDJSON streams), /api/health
+server.mjs          HTTP server: static files from dist/, /api/dive (topic and/or image), /api/deep and /api/chat (NDJSON streams), /api/health
 lib/pipeline.mjs    dive and deep-dive orchestration, prompts
-public/editor.js    the notes editor (Tiptap), Markdown export
-public/digest.js    the compact text of an iceberg that the chat sends to Claude
-public/vendor/      prebuilt Tiptap bundle; regenerate with `npm run vendor`
+web/editor.js      the notes editor (Tiptap), Markdown export
+web/digest.js      the compact text of an iceberg that the chat sends to Claude
 lib/claude.mjs      Anthropic SDK calls and output schemas
 lib/exa.mjs         Exa search and page contents
 lib/commons.mjs     Wikimedia Commons image search
-public/             the page (no build step)
+web/                the page source (Vite root); `npm run build` writes dist/
 test/               node:test suites; fakes stand in for Claude, Exa and Commons
 ```
 
